@@ -8,43 +8,69 @@ exports.handler = async function (event) {
   }
   try {
     const body = JSON.parse(event.body);
-    const contents = [];
+
+    // Build prompt from messages
+    let prompt = "";
     if (body.system) {
-      contents.push({ role:"user", parts:[{ text:"Instructions: "+body.system }] });
-      contents.push({ role:"model", parts:[{ text:"Understood." }] });
+      prompt += `System: ${body.system}\n\n`;
     }
     body.messages.forEach(m => {
-      contents.push({
-        role: m.role === "assistant" ? "model" : "user",
-        parts: [{ text: m.content }]
-      });
+      if (m.role === "user") prompt += `User: ${m.content}\n`;
+      if (m.role === "assistant") prompt += `Assistant: ${m.content}\n`;
     });
+    prompt += "Assistant:";
+
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contents })
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${process.env.HF_API_KEY}`
+        },
+        body: JSON.stringify({
+          inputs: prompt,
+          parameters: {
+            max_new_tokens: 500,
+            temperature: 0.7,
+            return_full_text: false
+          }
+        })
       }
     );
+
     const data = await res.json();
-    console.log("Gemini response:", JSON.stringify(data));
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) return {
-      statusCode: 200,
-      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify({ content: [{ text: "Error: " + JSON.stringify(data) }] })
-    };
+    console.log("HF response:", JSON.stringify(data));
+
+    let text = "";
+    if (Array.isArray(data)) {
+      text = data[0]?.generated_text || "";
+    } else if (data.error) {
+      text = "Model is loading, please try again in 20 seconds: " + data.error;
+    } else {
+      text = JSON.stringify(data);
+    }
+
+    // Clean up response
+    text = text.split("User:")[0].trim();
+
     return {
       statusCode: 200,
-      headers: { "Access-Control-Allow-Origin": "*", "Content-Type": "application/json" },
-      body: JSON.stringify({ content: [{ text }] })
+      headers: {
+        "Access-Control-Allow-Origin": "*",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        content: [{ text: text || "No response" }]
+      })
     };
   } catch (err) {
     return {
       statusCode: 500,
       headers: { "Access-Control-Allow-Origin": "*" },
-      body: JSON.stringify({ content: [{ text: "Error: " + err.message }] })
+      body: JSON.stringify({
+        content: [{ text: "Error: " + err.message }]
+      })
     };
   }
 };
