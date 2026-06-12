@@ -49,7 +49,7 @@ async function storageLoad(key, fallback) {
 // Claude API
 // ═══════════════════════════════════════════════════════════════
 async function claude(messages, system="") {
-  const r = await fetch("https://api.anthropic.com/v1/messages", {
+  const r = await fetch("/.netlify/functions/chat", {
     method:"POST", headers:{"Content-Type":"application/json"},
     body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, system, messages })
   });
