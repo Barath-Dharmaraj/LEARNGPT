@@ -8,51 +8,29 @@ exports.handler = async function (event) {
   }
   try {
     const body = JSON.parse(event.body);
-
-    // Build prompt from messages
-    let prompt = "";
+    const messages = [];
     if (body.system) {
-      prompt += `System: ${body.system}\n\n`;
+      messages.push({ role: "system", content: body.system });
     }
-    body.messages.forEach(m => {
-      if (m.role === "user") prompt += `User: ${m.content}\n`;
-      if (m.role === "assistant") prompt += `Assistant: ${m.content}\n`;
-    });
-    prompt += "Assistant:";
+    body.messages.forEach(m => messages.push(m));
 
-    const res = await fetch(
-      "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.3",
-      {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${process.env.HF_API_KEY}`
-        },
-        body: JSON.stringify({
-          inputs: prompt,
-          parameters: {
-            max_new_tokens: 500,
-            temperature: 0.7,
-            return_full_text: false
-          }
-        })
-      }
-    );
+    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${process.env.GROQ_API_KEY}`
+      },
+      body: JSON.stringify({
+        model: "llama-3.1-8b-instant",
+        messages,
+        max_tokens: 1000,
+        temperature: 0.7
+      })
+    });
 
     const data = await res.json();
-    console.log("HF response:", JSON.stringify(data));
-
-    let text = "";
-    if (Array.isArray(data)) {
-      text = data[0]?.generated_text || "";
-    } else if (data.error) {
-      text = "Model is loading, please try again in 20 seconds: " + data.error;
-    } else {
-      text = JSON.stringify(data);
-    }
-
-    // Clean up response
-    text = text.split("User:")[0].trim();
+    console.log("Groq response:", JSON.stringify(data));
+    const text = data.choices?.[0]?.message?.content;
 
     return {
       statusCode: 200,
@@ -61,7 +39,7 @@ exports.handler = async function (event) {
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        content: [{ text: text || "No response" }]
+        content: [{ text: text || "No response received" }]
       })
     };
   } catch (err) {
