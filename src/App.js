@@ -98,26 +98,50 @@ async function extractText(file) {
       return text.slice(0, 16000);
     }
     if (["docx","doc","pptx"].includes(ext)) {
-      return await new Promise(res => {
-        const r = new FileReader();
-        r.onload = e => {
-          const bytes = new Uint8Array(e.target.result);
-          let text = "", run = "";
-          for (let i = 0; i < bytes.length; i++) {
-            const c = bytes[i];
-            if (c >= 32 && c < 127) { run += String.fromCharCode(c); }
-            else { if (run.length > 4) text += run + " "; run = ""; }
+  return await new Promise(res => {
+    const r = new FileReader();
+    r.onload = async e => {
+      try {
+        // Try using mammoth.js for DOCX
+        if (ext === "docx" || ext === "doc") {
+          const script = document.createElement("script");
+          script.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+          document.head.appendChild(script);
+          await new Promise(r => { script.onload = r; });
+          const result = await mammoth.extractRawText({ arrayBuffer: e.target.result });
+          if (result.value && result.value.length > 50) {
+            res(result.value.slice(0, 16000));
+            return;
           }
-          if (run.length > 4) text += run;
-          const cleaned = text.replace(/<[^>]{0,120}>/g," ").replace(/\s{3,}/g,"\n").trim().slice(0,16000);
-          res(cleaned.length > 200 ? cleaned : `[Document: "${file.name}" — limited extraction.]`);
-        };
-        r.onerror = () => res(`[File: ${file.name}]`);
-        r.readAsArrayBuffer(file);
-      });
-    }
-  } catch(e) { console.warn("extraction failed", e); }
-  return `[Document: "${file.name}" (${fmtSize(file.size)}) — could not extract text.]`;
+        }
+        // Fallback — binary text extraction
+        const bytes = new Uint8Array(e.target.result);
+        let text = "", run = "";
+        for (let i = 0; i < bytes.length; i++) {
+          const c = bytes[i];
+          if (c >= 32 && c < 127) { run += String.fromCharCode(c); }
+          else { if (run.length > 4) text += run + " "; run = ""; }
+        }
+        if (run.length > 4) text += run;
+        const cleaned = text
+          .replace(/<[^>]{0,200}>/g, " ")
+          .replace(/\w+:\w+="[^"]*"/g, " ")
+          .replace(/[a-z]{20,}/gi, " ")
+          .replace(/\s{2,}/g, " ")
+          .trim();
+        const words = cleaned.split(" ")
+          .filter(w => w.length >= 2 && w.length <= 20 && /[a-zA-Z]/.test(w))
+          .join(" ")
+          .slice(0, 16000);
+        res(words.length > 100 ? words : 
+          `[Document: "${file.name}" — please convert to PDF for best results]`);
+      } catch(err) {
+        res(`[Document: "${file.name}" — extraction failed: ${err.message}]`);
+      }
+    };
+    r.onerror = () => res(`[File: ${file.name}]`);
+    r.readAsArrayBuffer(file);
+  });
 }
 
 // ═══════════════════════════════════════════════════════════════
