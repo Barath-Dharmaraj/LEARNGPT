@@ -508,7 +508,8 @@ const Layout = ({user,page,setPage,onLogout,children}) => {
   const [col,setCol]=useState(false);
   return (
     <div style={{display:"flex",minHeight:"100vh"}}>
-      <aside style={{width:col?58:212,flexShrink:0,borderRight:"1px solid rgba(255,255,255,0.08)",display:"flex",flexDirection:"column",transition:"width 0.22s",overflow:"hidden",position:"sticky",top:0,height:"100vh"}}>
+      {/* Desktop sidebar */}
+      <aside className="desktop-sidebar" style={{width:col?58:212,flexShrink:0,borderRight:"1px solid rgba(255,255,255,0.08)",flexDirection:"column",transition:"width 0.22s",overflow:"hidden",position:"sticky",top:0,height:"100vh"}}>
         <div style={{padding:col?"16px 10px":"16px 16px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:9,overflow:"hidden"}}>
             <div style={{width:30,height:30,background:"linear-gradient(135deg,#6366f1,#22d3ee)",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic name="brain" size={14} color="#fff"/></div>
@@ -541,7 +542,28 @@ const Layout = ({user,page,setPage,onLogout,children}) => {
           </button>
         </div>
       </aside>
-      <main style={{flex:1,overflow:"auto",minWidth:0}}>{children}</main>
+
+      {/* Main content */}
+      <main className="main-content" style={{flex:1,overflow:"auto",minWidth:0}}>
+        {children}
+      </main>
+
+      {/* Mobile bottom navigation */}
+      <div className="bottom-nav">
+        <div className="bottom-nav-inner">
+          {nav.slice(0,5).map(item=>(
+            <button key={item.id} className="bottom-nav-item" onClick={()=>setPage(item.id)}
+              style={{color:page===item.id?"#818cf8":"#64748b",background:page===item.id?"#6366f122":"transparent"}}>
+              <Ic name={item.icon} size={20} color={page===item.id?"#818cf8":"#64748b"}/>
+              <span style={{color:page===item.id?"#818cf8":"#64748b"}}>{item.label}</span>
+            </button>
+          ))}
+          <button className="bottom-nav-item" onClick={onLogout} style={{color:"#64748b"}}>
+            <Ic name="logout" size={20} color="#64748b"/>
+            <span>Out</span>
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
@@ -557,7 +579,7 @@ const Dashboard = ({user,docs,chatHistory,quizResults,flashcardStats,setPage}) =
     ?[{icon:"book",label:"Documents",value:docs.length,sub:totalChunks?`${totalChunks.toLocaleString()} chunks indexed`:"None uploaded yet",color:"#6366f1"},{icon:"chat",label:"Questions Asked",value:chatHistory.length,sub:"This session",color:"#22d3ee"},{icon:"quiz",label:"Quizzes Taken",value:quizResults.length,sub:avgQuiz!==null?`Avg ${avgQuiz}%`:"None yet",color:"#4ade80"},{icon:"flash",label:"Flashcard Sets",value:docs.filter(d=>d.flashcards?.length>0).length,sub:"Generated",color:"#fb923c"}]
     :[{icon:"book",label:"Docs Available",value:docs.length,sub:docs.length?`${totalChunks.toLocaleString()} chunks`:"No docs yet",color:"#6366f1"},{icon:"chat",label:"Questions Asked",value:chatHistory.length,sub:chatHistory.length?"This session":"Ask the AI tutor!",color:"#22d3ee"},{icon:"quiz",label:"Quizzes Taken",value:quizResults.length,sub:avgQuiz!==null?`Avg ${avgQuiz}%`:"None yet",color:"#4ade80"},{icon:"flash",label:"Cards Mastered",value:`${flashcardStats.known}/${flashcardStats.total}`,sub:flashcardStats.total?"Keep going!":"Generate flashcards first",color:"#fb923c"}];
   return (
-    <div style={{padding:"32px 36px",maxWidth:1050,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:1050,margin:"0 auto"}}>
       <div style={{marginBottom:26}}>
         <h1 style={{fontSize:25,fontWeight:700,marginBottom:4}}>
           {new Date().getHours()<12?"Good morning":new Date().getHours()<17?"Good afternoon":"Good evening"}, {user.name.split(" ")[0]} {isAdmin?"👑":"👋"}
@@ -642,7 +664,7 @@ const Upload = ({onUpload}) => {
     setDone(doc);onUpload(doc);setProcessing(false);
   };
   return (
-    <div style={{padding:"32px 36px",maxWidth:580,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:580,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
         <div style={{width:36,height:36,borderRadius:9,background:"#fb923c22",display:"flex",alignItems:"center",justifyContent:"center"}}><Ic name="shield" size={16} color="#fb923c"/></div>
         <div>
@@ -695,7 +717,7 @@ const Documents = ({user,docs,onDelete,setPage,setChatDoc}) => {
   const [confirm,setConfirm]=useState(null);
   const filtered=docs.filter(d=>d.name.toLowerCase().includes(search.toLowerCase())||d.filename.toLowerCase().includes(search.toLowerCase()));
   return (
-    <div style={{padding:"32px 36px",maxWidth:880,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:880,margin:"0 auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:22}}>
         <div>
           <h1 style={{fontSize:25,fontWeight:700,marginBottom:4}}>Document Library</h1>
@@ -882,7 +904,7 @@ const Flashcards = ({docs,onUpdateDoc,onFlashcardStats}) => {
   };
   if(docs.length===0) return <div style={{padding:"32px 36px"}}><h1 style={{fontSize:25,fontWeight:700,marginBottom:20}}>Flashcards</h1><EmptyState icon="flash" title="No documents available" sub="The admin will upload study materials soon."/></div>;
   return (
-    <div style={{padding:"32px 36px",maxWidth:660,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:660,margin:"0 auto"}}>
       <h1 style={{fontSize:25,fontWeight:700,marginBottom:5}}>Flashcards</h1>
       <p style={{color:"#64748b",fontSize:13.5,marginBottom:22}}>Select a document, then generate AI flashcards from its content.</p>
       <div style={{display:"flex",gap:9,marginBottom:22,flexWrap:"wrap"}}>
@@ -974,7 +996,7 @@ const Quiz = ({docs,onResult}) => {
   if(docs.length===0) return <div style={{padding:"32px 36px"}}><h1 style={{fontSize:25,fontWeight:700,marginBottom:20}}>Quiz</h1><EmptyState icon="quiz" title="No documents available" sub="The admin will upload study materials soon."/></div>;
 
   if(phase==="setup") return (
-    <div style={{padding:"32px 36px",maxWidth:520,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:520,margin:"0 auto"}}>
       <h1 style={{fontSize:25,fontWeight:700,marginBottom:5}}>Quiz Generator</h1>
       <p style={{color:"#64748b",fontSize:13.5,marginBottom:26}}>AI generates questions from your document's actual content.</p>
       <div style={{...glass(),padding:22,marginBottom:14}}>
@@ -1002,7 +1024,7 @@ const Quiz = ({docs,onResult}) => {
   );
 
   if(phase==="result") return (
-    <div style={{padding:"32px 36px",maxWidth:500,margin:"0 auto",textAlign:"center"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:500,margin:"0 auto",textAlign:"center"}}>
       <div style={{...glass(),padding:34}}>
         <div style={{width:72,height:72,borderRadius:"50%",background:(pct>=70?"#4ade80":"#fb923c")+"22",border:`3px solid ${pct>=70?"#4ade80":"#fb923c"}`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontSize:24,fontWeight:800,color:pct>=70?"#4ade80":"#fb923c"}}>{pct}%</div>
         <h2 style={{fontSize:20,fontWeight:700,marginBottom:5}}>Quiz Complete!</h2>
@@ -1028,7 +1050,7 @@ const Quiz = ({docs,onResult}) => {
   );
 
   return (
-    <div style={{padding:"32px 36px",maxWidth:560,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:560,margin:"0 auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:16,fontSize:13,color:"#64748b"}}>
         <span>Q{qIdx+1}/{questions.length} — <span style={{color:"#94a3b8"}}>{selDoc?.name}</span></span>
         <span style={{fontFamily:"'JetBrains Mono',monospace",color:"#22d3ee"}}>⏱ {Math.floor(elapsed/60)}:{String(elapsed%60).padStart(2,"0")}</span>
@@ -1060,7 +1082,7 @@ const Quiz = ({docs,onResult}) => {
 const Progress = ({docs,chatHistory,quizResults,flashcardStats}) => {
   const avg=quizResults.length?Math.round(quizResults.reduce((s,r)=>s+r.pct,0)/quizResults.length):null;
   return (
-    <div style={{padding:"32px 36px",maxWidth:820,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:820,margin:"0 auto"}}>
       <h1 style={{fontSize:25,fontWeight:700,marginBottom:5}}>Progress</h1>
       <p style={{color:"#64748b",fontSize:13.5,marginBottom:24}}>Your learning activity this session.</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(190px,1fr))",gap:13,marginBottom:22}}>
@@ -1103,7 +1125,7 @@ const Progress = ({docs,chatHistory,quizResults,flashcardStats}) => {
 const Analytics = ({docs,chatHistory,quizResults}) => {
   const maxChunks=docs.length?Math.max(...docs.map(d=>d.chunks)):1;
   return (
-    <div style={{padding:"32px 36px",maxWidth:860,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:860,margin:"0 auto"}}>
       <h1 style={{fontSize:25,fontWeight:700,marginBottom:5}}>Analytics</h1>
       <p style={{color:"#64748b",fontSize:13.5,marginBottom:22}}>Real-time platform activity.</p>
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(195px,1fr))",gap:13,marginBottom:22}}>
@@ -1157,7 +1179,7 @@ const Users = () => {
   useEffect(()=>{storageLoad(USERS_KEY,{}).then(u=>{setUsers(u);setLoading(false);});},[]);
   const list=Object.entries(users).map(([email,u])=>({email,...u}));
   return (
-    <div style={{padding:"32px 36px",maxWidth:820,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:820,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
         <div style={{width:36,height:36,borderRadius:9,background:"#6366f122",display:"flex",alignItems:"center",justifyContent:"center"}}><Ic name="users" size={17} color="#6366f1"/></div>
         <div><h1 style={{fontSize:25,fontWeight:700,lineHeight:1}}>Registered Students</h1><p style={{fontSize:13,color:"#64748b",marginTop:3}}>All students who have created accounts</p></div>
