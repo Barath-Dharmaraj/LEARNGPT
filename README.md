@@ -24,5 +24,3 @@ Live demo: https://learngpt-lms-barath.netlify.app
 - Markdown-rendered AI responses
 - Persistent document storage
 
-## Admin
-Admin credentials are secured via Netlify environment variables — not stored in code.
