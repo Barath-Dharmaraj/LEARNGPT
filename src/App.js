@@ -1,14 +1,11 @@
 import { useState, useEffect, useRef } from "react";
 
 // ═══════════════════════════════════════════════════════════════
-// ⚙️  ADMIN CONFIG — change this to your email & password
+// ⚙️  ADMIN CONFIG
 // ═══════════════════════════════════════════════════════════════
 const ADMIN_EMAIL = "admin@learngpt.com";
 const ADMIN_PASS  = "admin123";
 
-// ═══════════════════════════════════════════════════════════════
-// Design tokens
-// ═══════════════════════════════════════════════════════════════
 const GS = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,32 +26,46 @@ const fmtDate = ts => new Date(ts).toLocaleDateString("en-US",{month:"short",day
 const fmtTime = d  => new Date(d).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"});
 
 // ═══════════════════════════════════════════════════════════════
-// Persistent storage  (window.storage from artifact API)
+// Storage — uses localStorage for deployed version
 // ═══════════════════════════════════════════════════════════════
 const DOCS_KEY  = "learngpt:docs:v1";
 const USERS_KEY = "learngpt:users:v1";
 
 async function storageSave(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) { console.warn("save error:", e); }
 }
-
 async function storageLoad(key, fallback) {
-  try {
-    const v = localStorage.getItem(key);
-    return v ? JSON.parse(v) : fallback;
-  } catch { return fallback; }
+  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+  catch { return fallback; }
 }
 
 // ═══════════════════════════════════════════════════════════════
-// Claude API
+// AI — Groq (free) with retry logic
 // ═══════════════════════════════════════════════════════════════
-async function claude(messages, system="") {
-  const r = await fetch("/.netlify/functions/chat", {
-    method:"POST", headers:{"Content-Type":"application/json"},
-    body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, system, messages })
-  });
-  const d = await r.json();
-  return d.content?.[0]?.text || "";
+async function claude(messages, system="", retries=3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const r = await fetch("/.netlify/functions/chat", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({ model:"llama-3.1-8b-instant", max_tokens:1000, system, messages })
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(()=>({}));
+        if (r.status === 429 && i < retries-1) {
+          await new Promise(res => setTimeout(res, 2000 * (i+1)));
+          continue;
+        }
+        return `Error ${r.status}: ${err.error?.message || r.statusText}`;
+      }
+      const d = await r.json();
+      return d.content?.[0]?.text || d.choices?.[0]?.message?.content || "No response received";
+    } catch(e) {
+      if (i === retries-1) return `Error: ${e.message}`;
+      await new Promise(res => setTimeout(res, 1500));
+    }
+  }
+  return "Failed after multiple attempts. Please try again.";
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -69,6 +80,17 @@ async function loadPdfJs() {
       window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
       resolve(window.pdfjsLib);
     };
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+}
+
+async function loadMammoth() {
+  if (window.mammoth) return window.mammoth;
+  return new Promise((resolve, reject) => {
+    const s = document.createElement("script");
+    s.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
+    s.onload = () => resolve(window.mammoth);
     s.onerror = reject;
     document.head.appendChild(s);
   });
@@ -97,51 +119,129 @@ async function extractText(file) {
       }
       return text.slice(0, 16000);
     }
-    if (["docx","doc","pptx"].includes(ext)) {
-  return await new Promise(res => {
-    const r = new FileReader();
-    r.onload = async e => {
+    if (ext === "docx" || ext === "doc") {
       try {
-        // Try using mammoth.js for DOCX
-        if (ext === "docx" || ext === "doc") {
-          const script = document.createElement("script");
-          script.src = "https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js";
-          document.head.appendChild(script);
-          await new Promise(r => { script.onload = r; });
-          const result = await mammoth.extractRawText({ arrayBuffer: e.target.result });
-          if (result.value && result.value.length > 50) {
-            res(result.value.slice(0, 16000));
-            return;
+        const mammoth = await loadMammoth();
+        const buf = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer: buf });
+        if (result.value && result.value.length > 50) {
+          return result.value.slice(0, 16000);
+        }
+      } catch(e) { console.warn("mammoth failed, using fallback", e); }
+      // fallback binary extraction
+      return await new Promise(res => {
+        const r = new FileReader();
+        r.onload = e => {
+          const bytes = new Uint8Array(e.target.result);
+          let text = "", run = "";
+          for (let i = 0; i < bytes.length; i++) {
+            const c = bytes[i];
+            if (c >= 32 && c < 127) { run += String.fromCharCode(c); }
+            else { if (run.length > 4) text += run + " "; run = ""; }
           }
-        }
-        // Fallback — binary text extraction
-        const bytes = new Uint8Array(e.target.result);
-        let text = "", run = "";
-        for (let i = 0; i < bytes.length; i++) {
-          const c = bytes[i];
-          if (c >= 32 && c < 127) { run += String.fromCharCode(c); }
-          else { if (run.length > 4) text += run + " "; run = ""; }
-        }
-        if (run.length > 4) text += run;
-        const cleaned = text
-          .replace(/<[^>]{0,200}>/g, " ")
-          .replace(/\w+:\w+="[^"]*"/g, " ")
-          .replace(/[a-z]{20,}/gi, " ")
-          .replace(/\s{2,}/g, " ")
-          .trim();
-        const words = cleaned.split(" ")
-          .filter(w => w.length >= 2 && w.length <= 20 && /[a-zA-Z]/.test(w))
-          .join(" ")
-          .slice(0, 16000);
-        res(words.length > 100 ? words : 
-          `[Document: "${file.name}" — please convert to PDF for best results]`);
-      } catch(err) {
-        res(`[Document: "${file.name}" — extraction failed: ${err.message}]`);
-      }
-    };
-    r.onerror = () => res(`[File: ${file.name}]`);
-    r.readAsArrayBuffer(file);
+          if (run.length > 4) text += run;
+          const cleaned = text
+            .replace(/<[^>]{0,200}>/g," ")
+            .replace(/\w+:\w+="[^"]*"/g," ")
+            .replace(/[a-zA-Z]{25,}/g," ")
+            .replace(/\s{2,}/g," ")
+            .trim();
+          const words = cleaned.split(" ")
+            .filter(w => w.length >= 2 && w.length <= 25 && /[a-zA-Z]/.test(w))
+            .join(" ").slice(0, 16000);
+          res(words.length > 100 ? words : `[Document: "${file.name}" — please convert to PDF for better results]`);
+        };
+        r.onerror = () => res(`[File: ${file.name}]`);
+        r.readAsArrayBuffer(file);
+      });
+    }
+    if (ext === "pptx") {
+      return await new Promise(res => {
+        const r = new FileReader();
+        r.onload = e => {
+          const bytes = new Uint8Array(e.target.result);
+          let text = "", run = "";
+          for (let i = 0; i < bytes.length; i++) {
+            const c = bytes[i];
+            if (c >= 32 && c < 127) { run += String.fromCharCode(c); }
+            else { if (run.length > 3) text += run + " "; run = ""; }
+          }
+          const cleaned = text.replace(/<[^>]{0,120}>/g," ").replace(/\s{3,}/g," ").trim().slice(0,16000);
+          res(cleaned.length > 100 ? cleaned : `[PPTX: ${file.name}]`);
+        };
+        r.onerror = () => res(`[File: ${file.name}]`);
+        r.readAsArrayBuffer(file);
+      });
+    }
+  } catch(e) { console.warn("extraction failed", e); }
+  return `[Document: "${file.name}" (${fmtSize(file.size)}) — could not extract text.]`;
+}
+
+// ═══════════════════════════════════════════════════════════════
+// Markdown renderer — fixes **bold** showing as raw text
+// ═══════════════════════════════════════════════════════════════
+function renderMarkdown(text) {
+  if (!text) return null;
+  const lines = text.split("\n");
+  return lines.map((line, i) => {
+    // Source citation
+    if (line.startsWith("[Source:")) {
+      return <div key={i} style={{marginTop:8,padding:"5px 10px",background:"#6366f118",border:"1px solid #6366f133",borderRadius:6,fontSize:12,color:"#818cf8"}}>{line}</div>;
+    }
+    // Heading ##
+    if (line.startsWith("## ")) {
+      return <div key={i} style={{fontWeight:700,fontSize:16,marginTop:14,marginBottom:4,color:"#f1f5f9"}}>{parseBold(line.slice(3))}</div>;
+    }
+    // Heading ###
+    if (line.startsWith("### ")) {
+      return <div key={i} style={{fontWeight:600,fontSize:14,marginTop:10,marginBottom:3,color:"#e2e8f0"}}>{parseBold(line.slice(4))}</div>;
+    }
+    // Bullet * or -
+    if (line.match(/^[\*\-\+] /)) {
+      return <div key={i} style={{paddingLeft:16,marginTop:3,display:"flex",gap:8}}><span style={{color:"#6366f1",flexShrink:0}}>•</span><span>{parseBold(line.slice(2))}</span></div>;
+    }
+    // Numbered list
+    if (line.match(/^\d+\. /)) {
+      const num = line.match(/^(\d+)\. /)[1];
+      return <div key={i} style={{paddingLeft:16,marginTop:3,display:"flex",gap:8}}><span style={{color:"#6366f1",flexShrink:0,minWidth:18}}>{num}.</span><span>{parseBold(line.slice(num.length+2))}</span></div>;
+    }
+    // Indented bullet
+    if (line.match(/^\s+[\*\-\+] /)) {
+      return <div key={i} style={{paddingLeft:32,marginTop:2,display:"flex",gap:8,fontSize:13}}><span style={{color:"#818cf8",flexShrink:0}}>◦</span><span style={{color:"#94a3b8"}}>{parseBold(line.replace(/^\s+[\*\-\+] /,""))}</span></div>;
+    }
+    // Empty line
+    if (line.trim() === "") return <div key={i} style={{height:6}}/>;
+    // Normal text
+    return <div key={i} style={{marginTop:2,lineHeight:1.7}}>{parseBold(line)}</div>;
   });
+}
+
+function parseBold(text) {
+  if (!text.includes("**") && !text.includes("*") && !text.includes("`")) return text;
+  const parts = [];
+  let i = 0;
+  while (i < text.length) {
+    if (text[i] === "*" && text[i+1] === "*") {
+      const end = text.indexOf("**", i+2);
+      if (end !== -1) {
+        parts.push(<strong key={i} style={{color:"#f1f5f9",fontWeight:600}}>{text.slice(i+2, end)}</strong>);
+        i = end + 2; continue;
+      }
+    }
+    if (text[i] === "`") {
+      const end = text.indexOf("`", i+1);
+      if (end !== -1) {
+        parts.push(<code key={i} style={{background:"rgba(255,255,255,0.1)",padding:"1px 5px",borderRadius:4,fontSize:"0.9em",fontFamily:"'JetBrains Mono',monospace"}}>{text.slice(i+1, end)}</code>);
+        i = end + 1; continue;
+      }
+    }
+    // collect normal chars
+    let j = i;
+    while (j < text.length && !(text[j]==="*"&&text[j+1]==="*") && text[j]!=="`") j++;
+    if (j > i) parts.push(text.slice(i, j));
+    i = j;
+  }
+  return parts.length > 0 ? parts : text;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -150,7 +250,6 @@ async function extractText(file) {
 const Spinner = ({size=18}) => (
   <div style={{width:size,height:size,border:"2px solid rgba(255,255,255,0.09)",borderTopColor:"#6366f1",borderRadius:"50%",animation:"spin 0.65s linear infinite",flexShrink:0}}/>
 );
-
 const PATHS = {
   home:"M3 12L12 3l9 9M5 10v9a1 1 0 001 1h4v-5h4v5h4a1 1 0 001-1v-9",
   book:"M4 19.5A2.5 2.5 0 016.5 17H20M4 4h16v13H6.5A2.5 2.5 0 004 19.5V4z",
@@ -252,14 +351,13 @@ const Landing = ({onNav}) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// AUTH — admin = ADMIN_EMAIL only, everyone else = student
+// AUTH
 // ═══════════════════════════════════════════════════════════════
 const AuthPage = ({mode,onNav,onLogin}) => {
   const [form,setForm]=useState({name:"",email:"",password:""});
   const [show,setShow]=useState(false);
   const [loading,setLoading]=useState(false);
   const [err,setErr]=useState("");
-
   const submit=async()=>{
     setErr("");setLoading(true);
     await new Promise(r=>setTimeout(r,600));
@@ -285,7 +383,6 @@ const AuthPage = ({mode,onNav,onLogin}) => {
     }
     setLoading(false);
   };
-
   const field=(label,key,type="text",ph="")=>(
     <div style={{marginBottom:15}}>
       <label style={{fontSize:13,color:"#94a3b8",display:"block",marginBottom:6}}>{label}</label>
@@ -298,7 +395,6 @@ const AuthPage = ({mode,onNav,onLogin}) => {
       </div>
     </div>
   );
-
   return (
     <div style={{minHeight:"100vh",display:"flex",alignItems:"center",justifyContent:"center",padding:24}}>
       <div style={{position:"absolute",inset:0,background:"radial-gradient(ellipse at 30% 50%,#6366f10d 0%,transparent 60%)",pointerEvents:"none"}}/>
@@ -324,7 +420,7 @@ const AuthPage = ({mode,onNav,onLogin}) => {
         {mode==="login"&&(
           <div style={{marginTop:18,padding:"10px 12px",background:"#6366f10d",borderRadius:8,border:"1px solid #6366f122",fontSize:12,color:"#64748b",display:"flex",alignItems:"flex-start",gap:8}}>
             <Ic name="shield" size={13} color="#6366f1"/>
-            <span>Students: register with any email. Only the admin can upload documents — all students get access automatically.</span>
+            <span>Students: register with any email. Only the admin can upload documents.</span>
           </div>
         )}
       </div>
@@ -337,7 +433,6 @@ const AuthPage = ({mode,onNav,onLogin}) => {
 // ═══════════════════════════════════════════════════════════════
 const NAV_STUDENT=[{id:"dashboard",label:"Dashboard",icon:"home"},{id:"documents",label:"Library",icon:"book"},{id:"chat",label:"AI Tutor",icon:"chat"},{id:"flashcards",label:"Flashcards",icon:"flash"},{id:"quiz",label:"Quiz",icon:"quiz"},{id:"progress",label:"Progress",icon:"chart"}];
 const NAV_ADMIN  =[{id:"dashboard",label:"Dashboard",icon:"home"},{id:"upload",label:"Upload",icon:"upload"},{id:"documents",label:"Documents",icon:"book"},{id:"analytics",label:"Analytics",icon:"chart"},{id:"users",label:"Users",icon:"users"}];
-
 const Layout = ({user,page,setPage,onLogout,children}) => {
   const nav=user.role==="admin"?NAV_ADMIN:NAV_STUDENT;
   const [col,setCol]=useState(false);
@@ -449,7 +544,7 @@ const Dashboard = ({user,docs,chatHistory,quizResults,flashcardStats,setPage}) =
 };
 
 // ═══════════════════════════════════════════════════════════════
-// UPLOAD (admin only)
+// UPLOAD
 // ═══════════════════════════════════════════════════════════════
 const Upload = ({onUpload}) => {
   const [dragging,setDragging]=useState(false);
@@ -457,7 +552,6 @@ const Upload = ({onUpload}) => {
   const [stages,setStages]=useState([]);
   const [done,setDone]=useState(null);
   const inputRef=useRef(null);
-
   const processFile=async(file)=>{
     if(!file) return;
     const ext=file.name.split(".").pop().toLowerCase();
@@ -477,7 +571,6 @@ const Upload = ({onUpload}) => {
     const doc={id:Date.now(),name:file.name.replace(/\.[^.]+$/,""),filename:file.name,size:file.size,type:ext,uploadedAt:Date.now(),chunks,text,flashcards:[]};
     setDone(doc);onUpload(doc);setProcessing(false);
   };
-
   return (
     <div style={{padding:"32px 36px",maxWidth:580,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:6}}>
@@ -515,8 +608,7 @@ const Upload = ({onUpload}) => {
           ))}
           {done&&!processing&&(
             <div style={{marginTop:13,padding:"10px 12px",background:"#4ade8011",border:"1px solid #4ade8033",borderRadius:8,display:"flex",alignItems:"center",gap:8,color:"#4ade80",fontSize:13}}>
-              <Ic name="check" size={14} color="#4ade80"/>
-              "{done.name}" is live — all students can now chat with it!
+              <Ic name="check" size={14} color="#4ade80"/>"{done.name}" is live — all students can now chat with it!
             </div>
           )}
         </div>
@@ -545,7 +637,7 @@ const Documents = ({user,docs,onDelete,setPage,setChatDoc}) => {
       </div>
       {docs.length===0?(
         <EmptyState icon="book" title="No documents uploaded yet"
-          sub={user.role==="admin"?"Upload a PDF, DOCX, PPTX, or TXT file to get started.":"The admin hasn't uploaded any study materials yet."}
+          sub={user.role==="admin"?"Upload a PDF, DOCX, PPTX, or TXT file.":"The admin hasn't uploaded any study materials yet."}
           action={user.role==="admin"?"Upload Document":null} onAction={()=>setPage("upload")}/>
       ):(
         <>
@@ -593,7 +685,7 @@ const Documents = ({user,docs,onDelete,setPage,setChatDoc}) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// CHAT
+// CHAT — with markdown rendering + retry
 // ═══════════════════════════════════════════════════════════════
 const Chat = ({user,docs,chatDoc,onMessage}) => {
   const initMsg=()=>({role:"assistant",content:docs.length===0?"No documents uploaded yet. The admin will upload study materials soon.":chatDoc?`Ready! Ask me anything about "${chatDoc.name}" — I'll only answer from its content.`:`Hello ${user.name.split(" ")[0]}! I have ${docs.length} document${docs.length>1?"s":""} loaded. Ask me anything.`,ts:new Date()});
@@ -611,23 +703,27 @@ const Chat = ({user,docs,chatDoc,onMessage}) => {
     setMessages(p=>[...p,{role:"user",content:q,ts:new Date()}]);
     setLoading(true);onMessage(q);
     try {
-      const ctxText=selDoc?`Document: "${selDoc.name}" (${selDoc.filename})\n\nContent:\n${selDoc.text}`:docs.map(d=>`Document: "${d.name}"\nContent:\n${d.text}`).join("\n\n---\n\n");
+      const ctxText=selDoc
+        ?`Document: "${selDoc.name}" (${selDoc.filename})\n\nContent:\n${selDoc.text}`
+        :docs.map(d=>`Document: "${d.name}"\nContent:\n${d.text}`).join("\n\n---\n\n");
       const system=`You are an AI tutor. Answer questions using ONLY the document content below. Do not use outside knowledge.
-If the answer is present, answer clearly and cite: [Source: "Document Name"].
-If not found, say: "I couldn't find that in the uploaded documents."
-${ctxText.slice(0,14000)}`;
+Format your response clearly using:
+- **Bold** for important terms
+- Numbered lists for steps
+- Bullet points for items
+- ## Headings for sections
+Always cite: [Source: "Document Name"] at the end.
+If not found say: "I couldn't find that in the uploaded documents."
+
+${ctxText.slice(0,12000)}`;
       const history=messages.slice(-6).map(m=>({role:m.role,content:m.content}));
       const ans=await claude([...history,{role:"user",content:q}],system);
       setMessages(p=>[...p,{role:"assistant",content:ans,ts:new Date()}]);
-    } catch {setMessages(p=>[...p,{role:"assistant",content:"Something went wrong. Please try again.",ts:new Date()}]);}
+    } catch(e) {
+      setMessages(p=>[...p,{role:"assistant",content:`Error: ${e.message}. Please try again.`,ts:new Date()}]);
+    }
     setLoading(false);
   };
-
-  const renderContent=text=>text.split("\n").map((line,i)=>{
-    if(line.startsWith("[Source:")) return <div key={i} style={{marginTop:7,padding:"4px 9px",background:"#6366f118",border:"1px solid #6366f133",borderRadius:5,fontSize:12,color:"#818cf8"}}>{line}</div>;
-    if(line.startsWith("- ")||line.startsWith("• ")) return <div key={i} style={{paddingLeft:13,marginTop:2}}>• {line.slice(2)}</div>;
-    return <span key={i}>{line}{"\n"}</span>;
-  });
 
   return (
     <div style={{display:"flex",flexDirection:"column",height:"100vh"}}>
@@ -654,8 +750,10 @@ ${ctxText.slice(0,14000)}`;
             <div style={{width:29,height:29,borderRadius:7,flexShrink:0,background:msg.role==="user"?"#6366f144":"linear-gradient(135deg,#6366f144,#22d3ee44)",display:"flex",alignItems:"center",justifyContent:"center"}}>
               {msg.role==="user"?<span style={{fontSize:12.5,fontWeight:700,color:"#818cf8"}}>{user.name[0]}</span>:<Ic name="brain" size={12} color="#22d3ee"/>}
             </div>
-            <div style={{maxWidth:"75%",display:"flex",flexDirection:"column",alignItems:msg.role==="user"?"flex-end":"flex-start"}}>
-              <div style={{padding:"10px 13px",borderRadius:10,background:msg.role==="user"?"#6366f133":"rgba(255,255,255,0.04)",border:`1px solid ${msg.role==="user"?"#6366f144":"rgba(255,255,255,0.08)"}`,fontSize:13.5,lineHeight:1.65}}>{renderContent(msg.content)}</div>
+            <div style={{maxWidth:"78%",display:"flex",flexDirection:"column",alignItems:msg.role==="user"?"flex-end":"flex-start"}}>
+              <div style={{padding:"11px 14px",borderRadius:10,background:msg.role==="user"?"#6366f133":"rgba(255,255,255,0.04)",border:`1px solid ${msg.role==="user"?"#6366f144":"rgba(255,255,255,0.08)"}`,fontSize:13.5,lineHeight:1.7}}>
+                {msg.role==="assistant" ? renderMarkdown(msg.content) : msg.content}
+              </div>
               <span style={{fontSize:11,color:"#64748b",marginTop:3}}>{fmtTime(msg.ts)}</span>
             </div>
           </div>
@@ -663,7 +761,7 @@ ${ctxText.slice(0,14000)}`;
         {loading&&(
           <div style={{display:"flex",gap:11}}>
             <div style={{width:29,height:29,borderRadius:7,background:"linear-gradient(135deg,#6366f144,#22d3ee44)",display:"flex",alignItems:"center",justifyContent:"center"}}><Ic name="brain" size={12} color="#22d3ee"/></div>
-            <div style={{padding:"11px 14px",...glass(10),display:"flex",alignItems:"center",gap:8}}><Spinner size={14}/><span style={{fontSize:13,color:"#64748b"}}>Searching documents…</span></div>
+            <div style={{padding:"11px 14px",...glass(10),display:"flex",alignItems:"center",gap:8}}><Spinner size={14}/><span style={{fontSize:13,color:"#64748b"}}>Thinking…</span></div>
           </div>
         )}
         <div ref={bottomRef}/>
@@ -699,14 +797,17 @@ const Flashcards = ({docs,onUpdateDoc,onFlashcardStats}) => {
   const [known,setKnown]=useState(new Set());
   const selDoc=docs.find(d=>d.id===+selDocId);
   const cards=selDoc?.flashcards||[];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{const total=docs.reduce((s,d)=>s+(d.flashcards?.length||0),0);onFlashcardStats({known:known.size,total});},[known,docs]);
   const generate=async()=>{
     if(!selDoc) return;setGenerating(true);
     try {
       const res=await claude([{role:"user",content:`Generate 8 flashcard Q&A pairs from this document. Return ONLY a JSON array:\n[{"q":"question","a":"answer"}]\n\nDocument: "${selDoc.name}"\nContent:\n${selDoc.text.slice(0,9000)}`}],"Return ONLY a valid JSON array. No markdown.");
-      onUpdateDoc(selDoc.id,{flashcards:JSON.parse(res.replace(/```json|```/g,"").trim())});
+      const clean=res.replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(clean);
+      onUpdateDoc(selDoc.id,{flashcards:parsed});
       setIdx(0);setFlipped(false);setKnown(new Set());
-    } catch {alert("Could not generate flashcards. Try again.");}
+    } catch(e) {alert("Could not generate flashcards. Try again. Error: "+e.message);}
     setGenerating(false);
   };
   if(docs.length===0) return <div style={{padding:"32px 36px"}}><h1 style={{fontSize:25,fontWeight:700,marginBottom:20}}>Flashcards</h1><EmptyState icon="flash" title="No documents available" sub="The admin will upload study materials soon."/></div>;
@@ -759,7 +860,7 @@ const Flashcards = ({docs,onUpdateDoc,onFlashcardStats}) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// QUIZ
+// QUIZ — fixed results bug
 // ═══════════════════════════════════════════════════════════════
 const Quiz = ({docs,onResult}) => {
   const [phase,setPhase]=useState("setup");
@@ -772,21 +873,36 @@ const Quiz = ({docs,onResult}) => {
   const [generating,setGenerating]=useState(false);
   const [startTime,setStartTime]=useState(null);
   const [elapsed,setElapsed]=useState(0);
+  const [resultSaved,setResultSaved]=useState(false);
+
   useEffect(()=>{if(phase==="quiz"&&startTime){const t=setInterval(()=>setElapsed(Math.floor((Date.now()-startTime)/1000)),1000);return()=>clearInterval(t);}},[phase,startTime]);
+
   const selDoc=docs.find(d=>d.id===+selDocId);
   const startQuiz=async()=>{
     if(!selDoc) return;setGenerating(true);
     try {
       const res=await claude([{role:"user",content:`Generate exactly 5 ${difficulty} MCQs from this document. Return ONLY a JSON array:\n[{"q":"question","opts":["A","B","C","D"],"ans":0,"exp":"explanation"}]\n\nDocument: "${selDoc.name}"\nContent:\n${selDoc.text.slice(0,9000)}`}],"Return ONLY a valid JSON array. No markdown.");
-      const qs=JSON.parse(res.replace(/```json|```/g,"").trim());
-      setQuestions(qs);setPhase("quiz");setQIdx(0);setAnswers({});setShowExp(false);setStartTime(Date.now());setElapsed(0);
-    } catch {alert("Failed to generate quiz. Please try again.");}
+      const clean=res.replace(/```json|```/g,"").trim();
+      const qs=JSON.parse(clean);
+      setQuestions(qs);setPhase("quiz");setQIdx(0);setAnswers({});setShowExp(false);setStartTime(Date.now());setElapsed(0);setResultSaved(false);
+    } catch(e) {alert("Failed to generate quiz: "+e.message);}
     setGenerating(false);
   };
+
   const score=Object.entries(answers).filter(([i,a])=>questions[+i]?.ans===a).length;
   const pct=questions.length?Math.round((score/questions.length)*100):0;
   const q=questions[qIdx];
+
+  // Save result only once when result page is shown
+  useEffect(()=>{
+    if(phase==="result"&&!resultSaved&&questions.length>0){
+      setResultSaved(true);
+      onResult({pct,score,total:questions.length,doc:selDoc?.name,difficulty,time:elapsed});
+    }
+  },[phase]);
+
   if(docs.length===0) return <div style={{padding:"32px 36px"}}><h1 style={{fontSize:25,fontWeight:700,marginBottom:20}}>Quiz</h1><EmptyState icon="quiz" title="No documents available" sub="The admin will upload study materials soon."/></div>;
+
   if(phase==="setup") return (
     <div style={{padding:"32px 36px",maxWidth:520,margin:"0 auto"}}>
       <h1 style={{fontSize:25,fontWeight:700,marginBottom:5}}>Quiz Generator</h1>
@@ -814,34 +930,33 @@ const Quiz = ({docs,onResult}) => {
       </button>
     </div>
   );
-  if(phase==="result"){
-    onResult({pct,score,total:questions.length,doc:selDoc?.name,difficulty,time:elapsed});
-    return (
-      <div style={{padding:"32px 36px",maxWidth:500,margin:"0 auto",textAlign:"center"}}>
-        <div style={{...glass(),padding:34}}>
-          <div style={{width:72,height:72,borderRadius:"50%",background:(pct>=70?"#4ade80":"#fb923c")+"22",border:`3px solid ${pct>=70?"#4ade80":"#fb923c"}`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontSize:24,fontWeight:800,color:pct>=70?"#4ade80":"#fb923c"}}>{pct}%</div>
-          <h2 style={{fontSize:20,fontWeight:700,marginBottom:5}}>Quiz Complete!</h2>
-          <p style={{color:"#64748b",marginBottom:22,fontSize:13.5}}>{pct>=80?"Excellent!":pct>=60?"Good effort!":"Keep studying!"} — "{selDoc?.name}"</p>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9,marginBottom:20}}>
-            {[{v:score,l:"Correct",c:"#4ade80"},{v:questions.length-score,l:"Wrong",c:"#f87171"},{v:`${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`,l:"Time",c:"#22d3ee"}].map((s,i)=>(
-              <div key={i} style={{...glass(10),padding:11}}><div style={{fontSize:19,fontWeight:700,color:s.c,fontFamily:i===2?"'JetBrains Mono',monospace":"inherit"}}>{s.v}</div><div style={{fontSize:12,color:"#64748b"}}>{s.l}</div></div>
-            ))}
-          </div>
-          <div style={{textAlign:"left",marginBottom:18}}>
-            {questions.map((q,i)=>(
-              <div key={i} style={{...glass(8),padding:11,marginBottom:6,borderLeft:`3px solid ${answers[i]===q.ans?"#4ade80":"#f87171"}`}}>
-                <div style={{fontSize:13,fontWeight:500,marginBottom:3}}>{q.q}</div>
-                <div style={{fontSize:12,color:"#64748b"}}>Your answer: <span style={{color:answers[i]===q.ans?"#4ade80":"#f87171"}}>{q.opts?.[answers[i]]??"—"}</span></div>
-                {answers[i]!==q.ans&&<div style={{fontSize:12,color:"#4ade80"}}>Correct: {q.opts?.[q.ans]}</div>}
-                <div style={{fontSize:12,color:"#64748b",marginTop:3}}>💡 {q.exp}</div>
-              </div>
-            ))}
-          </div>
-          <button onClick={()=>setPhase("setup")} style={{...btn,...glass(9),padding:"9px 22px",fontSize:13.5}}>Take Another Quiz</button>
+
+  if(phase==="result") return (
+    <div style={{padding:"32px 36px",maxWidth:500,margin:"0 auto",textAlign:"center"}}>
+      <div style={{...glass(),padding:34}}>
+        <div style={{width:72,height:72,borderRadius:"50%",background:(pct>=70?"#4ade80":"#fb923c")+"22",border:`3px solid ${pct>=70?"#4ade80":"#fb923c"}`,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 16px",fontSize:24,fontWeight:800,color:pct>=70?"#4ade80":"#fb923c"}}>{pct}%</div>
+        <h2 style={{fontSize:20,fontWeight:700,marginBottom:5}}>Quiz Complete!</h2>
+        <p style={{color:"#64748b",marginBottom:22,fontSize:13.5}}>{pct>=80?"Excellent!":pct>=60?"Good effort!":"Keep studying!"} — "{selDoc?.name}"</p>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:9,marginBottom:20}}>
+          {[{v:score,l:"Correct",c:"#4ade80"},{v:questions.length-score,l:"Wrong",c:"#f87171"},{v:`${Math.floor(elapsed/60)}:${String(elapsed%60).padStart(2,"0")}`,l:"Time",c:"#22d3ee"}].map((s,i)=>(
+            <div key={i} style={{...glass(10),padding:11}}><div style={{fontSize:19,fontWeight:700,color:s.c,fontFamily:i===2?"'JetBrains Mono',monospace":"inherit"}}>{s.v}</div><div style={{fontSize:12,color:"#64748b"}}>{s.l}</div></div>
+          ))}
         </div>
+        <div style={{textAlign:"left",marginBottom:18}}>
+          {questions.map((q,i)=>(
+            <div key={i} style={{...glass(8),padding:11,marginBottom:6,borderLeft:`3px solid ${answers[i]===q.ans?"#4ade80":"#f87171"}`}}>
+              <div style={{fontSize:13,fontWeight:500,marginBottom:3}}>{q.q}</div>
+              <div style={{fontSize:12,color:"#64748b"}}>Your answer: <span style={{color:answers[i]===q.ans?"#4ade80":"#f87171"}}>{q.opts?.[answers[i]]??"—"}</span></div>
+              {answers[i]!==q.ans&&<div style={{fontSize:12,color:"#4ade80"}}>Correct: {q.opts?.[q.ans]}</div>}
+              <div style={{fontSize:12,color:"#64748b",marginTop:3}}>💡 {q.exp}</div>
+            </div>
+          ))}
+        </div>
+        <button onClick={()=>{setPhase("setup");setResultSaved(false);}} style={{...btn,...glass(9),padding:"9px 22px",fontSize:13.5}}>Take Another Quiz</button>
       </div>
-    );
-  }
+    </div>
+  );
+
   return (
     <div style={{padding:"32px 36px",maxWidth:560,margin:"0 auto"}}>
       <div style={{display:"flex",justifyContent:"space-between",marginBottom:16,fontSize:13,color:"#64748b"}}>
@@ -913,7 +1028,7 @@ const Progress = ({docs,chatHistory,quizResults,flashcardStats}) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// ANALYTICS (admin)
+// ANALYTICS
 // ═══════════════════════════════════════════════════════════════
 const Analytics = ({docs,chatHistory,quizResults}) => {
   const maxChunks=docs.length?Math.max(...docs.map(d=>d.chunks)):1;
@@ -964,7 +1079,7 @@ const Analytics = ({docs,chatHistory,quizResults}) => {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// USERS (admin)
+// USERS
 // ═══════════════════════════════════════════════════════════════
 const Users = () => {
   const [users,setUsers]=useState({});
@@ -1013,7 +1128,6 @@ export default function App() {
   const [flashcardStats,setFlashcardStats] = useState({known:0,total:0});
   const [chatDoc,setChatDoc] = useState(null);
 
-  // Load persisted docs on mount
   useEffect(()=>{
     storageLoad(DOCS_KEY,[]).then(saved=>{
       if(Array.isArray(saved)) setDocs(saved);
@@ -1021,7 +1135,6 @@ export default function App() {
     });
   },[]);
 
-  // Persist docs whenever they change (skip initial load)
   const firstRender = useRef(true);
   useEffect(()=>{
     if(firstRender.current){firstRender.current=false;return;}
