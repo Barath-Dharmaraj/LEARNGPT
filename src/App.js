@@ -3,8 +3,7 @@ import { useState, useEffect, useRef } from "react";
 // ═══════════════════════════════════════════════════════════════
 // ⚙️  ADMIN CONFIG
 // ═══════════════════════════════════════════════════════════════
-const ADMIN_EMAIL = "admin@learngpt.com";
-const ADMIN_PASS  = "admin123";
+
 
 const GS = `
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -363,9 +362,17 @@ const AuthPage = ({mode,onNav,onLogin}) => {
     await new Promise(r=>setTimeout(r,600));
     if(!form.email||!form.password){setErr("Please fill all fields.");setLoading(false);return;}
     if(mode==="login"){
-      if(form.email.toLowerCase()===ADMIN_EMAIL.toLowerCase()){
-        if(form.password!==ADMIN_PASS){setErr("Incorrect admin password.");setLoading(false);return;}
-        onLogin({name:"Admin",email:ADMIN_EMAIL,role:"admin"});setLoading(false);return;
+      // Check admin via secure server function
+      const adminCheck = await fetch("/.netlify/functions/admin-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: form.email, password: form.password })
+      });
+      const adminResult = await adminCheck.json();
+      if (adminResult.success) {
+        onLogin({ name: "Admin", email: form.email, role: "admin" });
+        setLoading(false);
+        return;
       }
       const users=await storageLoad(USERS_KEY,{});
       const u=users[form.email.toLowerCase()];
