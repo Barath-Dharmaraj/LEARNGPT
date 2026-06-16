@@ -380,7 +380,6 @@ const AuthPage = ({mode,onNav,onLogin}) => {
       if(u.password!==form.password){setErr("Incorrect password.");setLoading(false);return;}
       onLogin({name:u.name,email:form.email.toLowerCase(),role:"student"});
     } else {
-      if(form.email.toLowerCase()===ADMIN_EMAIL.toLowerCase()){setErr("This email is reserved.");setLoading(false);return;}
       if(!form.name.trim()){setErr("Please enter your name.");setLoading(false);return;}
       const users=await storageLoad(USERS_KEY,{});
       if(users[form.email.toLowerCase()]){setErr("Email already registered. Sign in instead.");setLoading(false);return;}
