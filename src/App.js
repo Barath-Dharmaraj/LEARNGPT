@@ -15,6 +15,55 @@ const GS = `
   @keyframes spin  { to { transform: rotate(360deg); } }
   @keyframes fade-in { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
   @keyframes float { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px)} }
+
+  /* ── Mobile bottom nav ── */
+  .bottom-nav {
+    display: none;
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    background: #0d1117;
+    border-top: 1px solid rgba(255,255,255,0.09);
+    z-index: 100;
+    padding: 6px 0 10px;
+  }
+  .bottom-nav-inner {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+  }
+  .bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    padding: 6px 12px;
+    border-radius: 10px;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    font-family: inherit;
+    transition: all 0.18s;
+  }
+  .bottom-nav-item span {
+    font-size: 10px;
+    font-weight: 500;
+  }
+  .desktop-sidebar { display: flex; }
+
+  @media (max-width: 768px) {
+    .desktop-sidebar { display: none !important; }
+    .bottom-nav { display: block; }
+    .main-content { padding-bottom: 80px !important; }
+    .page-padding { padding: 20px 16px !important; }
+    .stats-grid { grid-template-columns: 1fr 1fr !important; }
+    .doc-actions { flex-direction: column !important; gap: 6px !important; }
+    .chat-header { flex-wrap: wrap !important; gap: 8px !important; }
+    .chat-select { width: 100% !important; }
+    .quiz-opts { flex-direction: column !important; }
+    .hero-btns { flex-direction: column !important; align-items: center !important; }
+    .hero-pills { display: none !important; }
+    .nav-links { display: none !important; }
+  }
 `;
 const glass = (r=14) => ({ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.09)", backdropFilter:"blur(18px)", borderRadius:r });
 const btn   = { cursor:"pointer", border:"none", outline:"none", fontFamily:"inherit", fontWeight:500, transition:"all 0.18s" };
