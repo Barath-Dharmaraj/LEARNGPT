@@ -31,11 +31,26 @@ const DOCS_KEY  = "learngpt:docs:v1";
 const USERS_KEY = "learngpt:users:v1";
 
 async function storageSave(key, value) {
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch(e) { console.warn("save error:", e); }
+  try {
+    // Save to server via Netlify function
+    await fetch("/.netlify/functions/storage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "set", key, value: JSON.stringify(value) })
+    });
+  } catch(e) { console.warn("save error:", e); }
 }
+
 async function storageLoad(key, fallback) {
-  try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
-  catch { return fallback; }
+  try {
+    const r = await fetch("/.netlify/functions/storage", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "get", key })
+    });
+    const d = await r.json();
+    return d.value ? JSON.parse(d.value) : fallback;
+  } catch { return fallback; }
 }
 
 // ═══════════════════════════════════════════════════════════════
