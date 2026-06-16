@@ -101,6 +101,29 @@ async function storageLoad(key, fallback) {
     return d.value ? JSON.parse(d.value) : fallback;
   } catch { return fallback; }
 }
+// Save student progress to server
+async function saveProgress(email, data) {
+  try {
+    await fetch("/.netlify/functions/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save", email, data })
+    });
+  } catch(e) { console.warn("progress save error:", e); }
+}
+
+// Load all students progress (admin)
+async function loadAllProgress() {
+  try {
+    const r = await fetch("/.netlify/functions/progress", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "getAll" })
+    });
+    const d = await r.json();
+    return d.progress || {};
+  } catch { return {}; }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // AI — Groq (free) with retry logic
@@ -338,6 +361,7 @@ const PATHS = {
   users:"M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M9 11a4 4 0 100-8 4 4 0 000 8zM23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75",
   eye:"M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 9a3 3 0 100 6 3 3 0 000-6z",
   eyeoff:"M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24M1 1l22 22",
+  x:"M18 6L6 18M6 6l12 12",
 };
 const Ic = ({name,size=18,color="currentColor"}) => (
   <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
@@ -1173,35 +1197,161 @@ const Analytics = ({docs,chatHistory,quizResults}) => {
 // ═══════════════════════════════════════════════════════════════
 // USERS
 // ═══════════════════════════════════════════════════════════════
-const Users = () => {
-  const [users,setUsers]=useState({});
-  const [loading,setLoading]=useState(true);
-  useEffect(()=>{storageLoad(USERS_KEY,{}).then(u=>{setUsers(u);setLoading(false);});},[]);
-  const list=Object.entries(users).map(([email,u])=>({email,...u}));
+const Users = ({user}) => {
+  const [students, setStudents] = useState({});
+  const [users, setUsers] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState(null);
+
+  useEffect(() => {
+    Promise.all([
+      storageLoad(USERS_KEY, {}),
+      loadAllProgress()
+    ]).then(([u, p]) => {
+      setUsers(u);
+      setStudents(p);
+      setLoading(false);
+    });
+  }, []);
+
+  const list = Object.entries(users).map(([email, u]) => ({
+    email,
+    name: u.name,
+    ...(students[email] || {}),
+  }));
+
+  const fmtAgo = ts => {
+    if (!ts) return "Never";
+    const mins = Math.floor((Date.now() - ts) / 60000);
+    if (mins < 1) return "Just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.floor(hrs/24)}d ago`;
+  };
+
   return (
-    <div className="page-padding" style={{padding:"32px 36px",maxWidth:820,margin:"0 auto"}}>
+    <div className="page-padding" style={{padding:"32px 36px",maxWidth:1000,margin:"0 auto"}}>
       <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:24}}>
-        <div style={{width:36,height:36,borderRadius:9,background:"#6366f122",display:"flex",alignItems:"center",justifyContent:"center"}}><Ic name="users" size={17} color="#6366f1"/></div>
-        <div><h1 style={{fontSize:25,fontWeight:700,lineHeight:1}}>Registered Students</h1><p style={{fontSize:13,color:"#64748b",marginTop:3}}>All students who have created accounts</p></div>
+        <div style={{width:36,height:36,borderRadius:9,background:"#6366f122",display:"flex",alignItems:"center",justifyContent:"center"}}>
+          <Ic name="users" size={17} color="#6366f1"/>
+        </div>
+        <div>
+          <h1 style={{fontSize:25,fontWeight:700,lineHeight:1}}>Student Progress</h1>
+          <p style={{fontSize:13,color:"#64748b",marginTop:3}}>{list.length} registered students</p>
+        </div>
       </div>
-      {loading?<div style={{display:"flex",justifyContent:"center",padding:40}}><Spinner size={24}/></div>
-        :list.length===0
-          ?<EmptyState icon="users" title="No students yet" sub="Students who register will appear here. Share the link to your app!"/>
-          :<div style={{...glass(),overflow:"hidden"}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",padding:"10px 16px",borderBottom:"1px solid rgba(255,255,255,0.08)"}}>
-              {["Name","Email","Role"].map(h=><span key={h} style={{fontSize:11.5,color:"#64748b",fontWeight:600,letterSpacing:"0.05em",textTransform:"uppercase"}}>{h}</span>)}
-            </div>
-            {list.map((u,i)=>(
-              <div key={u.email} style={{display:"grid",gridTemplateColumns:"1fr 1fr auto",padding:"12px 16px",borderBottom:i<list.length-1?"1px solid rgba(255,255,255,0.06)":"none",alignItems:"center"}}>
-                <div style={{display:"flex",alignItems:"center",gap:9}}>
-                  <div style={{width:28,height:28,borderRadius:7,background:"#6366f133",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#818cf8",flexShrink:0}}>{u.name[0].toUpperCase()}</div>
-                  <span style={{fontSize:13.5,fontWeight:500}}>{u.name}</span>
+
+      {loading ? (
+        <div style={{display:"flex",justifyContent:"center",padding:40}}><Spinner size={24}/></div>
+      ) : list.length === 0 ? (
+        <EmptyState icon="users" title="No students yet" sub="Students who register will appear here with their progress."/>
+      ) : (
+        <>
+          {/* Overview cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(200px,1fr))",gap:13,marginBottom:22}}>
+            {[
+              {icon:"users",label:"Total Students",value:list.length,color:"#6366f1"},
+              {icon:"quiz",label:"Avg Quiz Score",value:list.filter(s=>s.avgScore).length ? Math.round(list.filter(s=>s.avgScore).reduce((a,s)=>a+s.avgScore,0)/list.filter(s=>s.avgScore).length)+"%" : "—",color:"#4ade80"},
+              {icon:"chat",label:"Total Questions",value:list.reduce((a,s)=>a+(s.questionsAsked||0),0),color:"#22d3ee"},
+              {icon:"flash",label:"Flashcards Mastered",value:list.reduce((a,s)=>a+(s.flashcardsMastered||0),0),color:"#fb923c"},
+            ].map((s,i)=>(
+              <div key={i} style={{...glass(),padding:17}}>
+                <div style={{width:33,height:33,borderRadius:8,background:s.color+"22",display:"flex",alignItems:"center",justifyContent:"center",marginBottom:9}}>
+                  <Ic name={s.icon} size={15} color={s.color}/>
                 </div>
-                <span style={{fontSize:13,color:"#64748b"}}>{u.email}</span>
-                <Badge color="#6366f1">student</Badge>
+                <div style={{fontSize:24,fontWeight:700}}>{s.value}</div>
+                <div style={{fontSize:12.5,color:"#64748b",marginTop:3}}>{s.label}</div>
               </div>
             ))}
-          </div>}
+          </div>
+
+          {/* Student list */}
+          <div style={{...glass(),overflow:"hidden",marginBottom:selected?16:0}}>
+            <div style={{padding:"11px 16px",borderBottom:"1px solid rgba(255,255,255,0.08)",display:"grid",gridTemplateColumns:"1.5fr 1fr 1fr 1fr 1fr auto",gap:8}}>
+              {["Student","Questions","Quizzes","Avg Score","Last Active",""].map(h=>(
+                <span key={h} style={{fontSize:11.5,color:"#64748b",fontWeight:600,letterSpacing:"0.04em",textTransform:"uppercase"}}>{h}</span>
+              ))}
+            </div>
+            {list.map((s,i)=>(
+              <div key={s.email} style={{padding:"13px 16px",borderBottom:i<list.length-1?"1px solid rgba(255,255,255,0.06)":"none",display:"grid",gridTemplateColumns:"1.5fr 1fr 1fr 1fr 1fr auto",gap:8,alignItems:"center",cursor:"pointer",background:selected?.email===s.email?"#6366f10a":"transparent"}}
+                onClick={()=>setSelected(selected?.email===s.email?null:s)}>
+                <div style={{display:"flex",alignItems:"center",gap:9}}>
+                  <div style={{width:30,height:30,borderRadius:7,background:"#6366f133",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#818cf8",fontSize:13,flexShrink:0}}>
+                    {s.name?.[0]?.toUpperCase()||"?"}
+                  </div>
+                  <div>
+                    <div style={{fontSize:13.5,fontWeight:500}}>{s.name}</div>
+                    <div style={{fontSize:11,color:"#64748b"}}>{s.email}</div>
+                  </div>
+                </div>
+                <span style={{fontSize:13,color:"#94a3b8"}}>{s.questionsAsked||0}</span>
+                <span style={{fontSize:13,color:"#94a3b8"}}>{s.quizzesTaken||0}</span>
+                <span style={{fontSize:13}}>
+                  {s.avgScore ? <Badge color={s.avgScore>=70?"#4ade80":"#fb923c"}>{s.avgScore}%</Badge> : <span style={{color:"#64748b"}}>—</span>}
+                </span>
+                <span style={{fontSize:12,color:"#64748b"}}>{fmtAgo(s.lastActive)}</span>
+                <Ic name="arrow" size={14} color="#64748b"/>
+              </div>
+            ))}
+          </div>
+
+          {/* Selected student detail */}
+          {selected && (
+            <div style={{...glass(),padding:22,animation:"fade-in 0.3s ease"}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:40,height:40,borderRadius:10,background:"#6366f133",display:"flex",alignItems:"center",justifyContent:"center",fontWeight:700,color:"#818cf8",fontSize:16}}>
+                    {selected.name?.[0]?.toUpperCase()||"?"}
+                  </div>
+                  <div>
+                    <div style={{fontSize:16,fontWeight:600}}>{selected.name}</div>
+                    <div style={{fontSize:12,color:"#64748b"}}>{selected.email}</div>
+                  </div>
+                </div>
+                <button onClick={()=>setSelected(null)} style={{...btn,background:"none",color:"#64748b"}}><Ic name="x" size={18}/></button>
+              </div>
+
+              <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(140px,1fr))",gap:10,marginBottom:18}}>
+                {[
+                  {label:"Questions Asked",value:selected.questionsAsked||0,color:"#22d3ee"},
+                  {label:"Quizzes Taken",value:selected.quizzesTaken||0,color:"#6366f1"},
+                  {label:"Average Score",value:selected.avgScore?selected.avgScore+"%":"—",color:"#4ade80"},
+                  {label:"Best Score",value:selected.bestScore?selected.bestScore+"%":"—",color:"#fb923c"},
+                  {label:"Cards Mastered",value:`${selected.flashcardsMastered||0}/${selected.totalFlashcards||0}`,color:"#a78bfa"},
+                ].map((s,i)=>(
+                  <div key={i} style={{...glass(10),padding:13}}>
+                    <div style={{fontSize:18,fontWeight:700,color:s.color}}>{s.value}</div>
+                    <div style={{fontSize:11.5,color:"#64748b",marginTop:2}}>{s.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {selected.quizHistory?.length > 0 && (
+                <>
+                  <h4 style={{fontSize:14,fontWeight:600,marginBottom:10}}>Recent Quiz History</h4>
+                  {selected.quizHistory.slice().reverse().map((q,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid rgba(255,255,255,0.07)",fontSize:13}}>
+                      <span style={{color:"#94a3b8",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"55%"}}>{q.doc}</span>
+                      <div style={{display:"flex",gap:10,flexShrink:0}}>
+                        <Badge color={q.pct>=70?"#4ade80":"#fb923c"}>{q.pct}%</Badge>
+                        <span style={{color:"#64748b",textTransform:"capitalize",fontSize:12}}>{q.difficulty}</span>
+                        <span style={{color:"#64748b",fontSize:12}}>{q.score}/{q.total}</span>
+                      </div>
+                    </div>
+                  ))}
+                </>
+              )}
+
+              {!selected.quizzesTaken && !selected.questionsAsked && (
+                <div style={{textAlign:"center",padding:"20px 0",color:"#64748b",fontSize:13.5}}>
+                  This student hasn't been active yet.
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 };
@@ -1233,8 +1383,31 @@ export default function App() {
     storageSave(DOCS_KEY, docs);
   },[docs]);
 
-  const handleLogin  = u => {setUser(u);setPage("dashboard");setRoute("app");};
-  const handleLogout = () => {setUser(null);setRoute("landing");setPage("dashboard");setChatHistory([]);setQuizResults([]);};
+  const handleLogin = u => {
+  setUser(u);
+  setPage("dashboard");
+  setRoute("app");
+};
+  const handleLogout = async () => {
+  // Save progress before logout
+  if (user && user.role === "student") {
+    await saveProgress(user.email, {
+      name: user.name,
+      questionsAsked: chatHistory.length,
+      quizzesTaken: quizResults.length,
+      avgScore: quizResults.length ? Math.round(quizResults.reduce((s,r)=>s+r.pct,0)/quizResults.length) : 0,
+      bestScore: quizResults.length ? Math.max(...quizResults.map(r=>r.pct)) : 0,
+      flashcardsMastered: flashcardStats.known,
+      totalFlashcards: flashcardStats.total,
+      quizHistory: quizResults.slice(-5),
+    });
+  }
+  setUser(null);
+  setRoute("landing");
+  setPage("dashboard");
+  setChatHistory([]);
+  setQuizResults([]);
+};
 
   const renderPage = () => {
     if(page==="upload"&&user?.role!=="admin"){setPage("dashboard");return null;}
@@ -1244,10 +1417,25 @@ export default function App() {
       case "documents":  return <Documents user={user} docs={docs} onDelete={id=>setDocs(p=>p.filter(d=>d.id!==id))} setPage={setPage} setChatDoc={setChatDoc}/>;
       case "chat":       return <Chat user={user} docs={docs} chatDoc={chatDoc} onMessage={q=>setChatHistory(p=>[...p,{q,ts:Date.now()}])}/>;
       case "flashcards": return <Flashcards docs={docs} onUpdateDoc={(id,u)=>setDocs(p=>p.map(d=>d.id===id?{...d,...u}:d))} onFlashcardStats={setFlashcardStats}/>;
-      case "quiz":       return <Quiz docs={docs} onResult={r=>setQuizResults(p=>[...p,r])}/>;
+      case "quiz": return <Quiz docs={docs} onResult={async r=>{
+  const updated = [...quizResults, r];
+  setQuizResults(updated);
+  if(user.role==="student") {
+    await saveProgress(user.email, {
+      name: user.name,
+      questionsAsked: chatHistory.length,
+      quizzesTaken: updated.length,
+      avgScore: Math.round(updated.reduce((s,x)=>s+x.pct,0)/updated.length),
+      bestScore: Math.max(...updated.map(x=>x.pct)),
+      flashcardsMastered: flashcardStats.known,
+      totalFlashcards: flashcardStats.total,
+      quizHistory: updated.slice(-5),
+    });
+  }
+}}/>;
       case "progress":   return <Progress docs={docs} chatHistory={chatHistory} quizResults={quizResults} flashcardStats={flashcardStats}/>;
       case "analytics":  return <Analytics docs={docs} chatHistory={chatHistory} quizResults={quizResults}/>;
-      case "users":      return <Users/>;
+      case "users": return <Users user={user}/>;
       default:           return <Dashboard user={user} docs={docs} chatHistory={chatHistory} quizResults={quizResults} flashcardStats={flashcardStats} setPage={setPage}/>;
     }
   };
