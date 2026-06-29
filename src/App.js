@@ -1061,6 +1061,8 @@ const Dashboard = ({user,docs,chatHistory,quizResults,flashcardStats,setPage,str
         </div>
       )}
 
+      <div style={{...glass(),overflow:"hidden"}}>
+        {docs.length===0
           ?<EmptyState icon={isAdmin?"upload":"book"} title={isAdmin?"No documents yet":"Library is empty"}
               sub={isAdmin?"Upload your first document. Students can then chat with it, take quizzes, and create flashcards.":"The admin hasn't uploaded any documents yet."}
               action={isAdmin?"Upload First Document":null} onAction={()=>setPage("upload")}/>
