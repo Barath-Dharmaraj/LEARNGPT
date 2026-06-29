@@ -216,7 +216,3 @@ Response with [Source: "Document Name"] citation
 - GitHub: [@Barath-Dharmaraj](https://github.com/Barath-Dharmaraj)
 - Live App: [learngpt-lms-barath.netlify.app](https://learngpt-lms-barath.netlify.app)
 
----
-
-## 📄 License
-MIT License — free to use, modify, and distribute.
