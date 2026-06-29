@@ -1202,7 +1202,8 @@ const Documents = ({user,docs,onDelete,setPage,setChatDoc}) => {
           {filtered.length===0?<div style={{textAlign:"center",padding:36,color:"var(--text3)"}}>No documents match "{search}"</div>
             :<div style={{display:"flex",flexDirection:"column",gap:8}}>
               {filtered.map(doc=>(
-                <div key={doc.id} style={{...glass(),padding:"14px 17px",display:"flex",alignItems:"center",gap:13,animation:"fade-in 0.3s ease"}}>
+                <div key={doc.id} style={{marginBottom:user.role==="student"?4:0}}>
+                  <div style={{...glass(),padding:"14px 17px",display:"flex",alignItems:"center",gap:13,animation:"fade-in 0.3s ease"}}>
                   <div style={{width:40,height:40,borderRadius:9,background:fileClr(doc.filename)+"22",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><Ic name="file" size={18} color={fileClr(doc.filename)}/></div>
                   <div style={{flex:1,minWidth:0}}>
                     <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:3}}>
@@ -1215,8 +1216,9 @@ const Documents = ({user,docs,onDelete,setPage,setChatDoc}) => {
                     <button onClick={()=>{setChatDoc(doc);setPage("chat");}} style={{...btn,...glass(8),padding:"6px 12px",fontSize:12.5,color:"#818cf8",display:"flex",alignItems:"center",gap:5}}><Ic name="chat" size={12} color="#818cf8"/> Chat</button>
                     {user.role==="admin"&&<button onClick={()=>setConfirm(doc)} style={{...btn,background:"#f8717118",border:"1px solid #f8717133",padding:"6px 9px",borderRadius:8}}><Ic name="trash" size={13} color="#f87171"/></button>}
                   </div>
+                  </div>
+                  {user.role==="student"&&<DocSummary doc={doc}/>}
                 </div>
-                {user.role==="student"&&<DocSummary doc={doc}/>}
               ))}
             </div>}
         </>}
