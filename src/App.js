@@ -141,6 +141,77 @@ function rlCanCall() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// 🔥 STREAK SYSTEM
+// ═══════════════════════════════════════════════════════════════
+const streakKey = email => `learngpt:streak:${email}`;
+function getOrUpdateStreak(email) {
+  try {
+    const today = new Date().toDateString();
+    const yesterday = new Date(Date.now()-86400000).toDateString();
+    const raw = localStorage.getItem(streakKey(email));
+    const data = raw ? JSON.parse(raw) : {streak:0,lastDate:null,longest:0};
+    if (data.lastDate===today) return data;
+    const newStreak = data.lastDate===yesterday ? data.streak+1 : 1;
+    const updated = {streak:newStreak, lastDate:today, longest:Math.max(newStreak,data.longest||0)};
+    localStorage.setItem(streakKey(email), JSON.stringify(updated));
+    return updated;
+  } catch { return {streak:1,lastDate:new Date().toDateString(),longest:1}; }
+}
+function readStreak(email) {
+  try { return JSON.parse(localStorage.getItem(streakKey(email))||'{"streak":0,"longest":0}'); }
+  catch { return {streak:0,longest:0}; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 🏅 ACHIEVEMENTS
+// ═══════════════════════════════════════════════════════════════
+const ACHIEVEMENTS_DEF = [
+  {id:"first_quiz",   icon:"🎯", title:"Quiz Starter",  desc:"Complete your first quiz",       check:s=>s.quizzesTaken>=1},
+  {id:"perfect",      icon:"💯", title:"Perfect Score", desc:"Score 100% on any quiz",          check:s=>s.bestScore>=100},
+  {id:"curious",      icon:"💬", title:"Curious Mind",  desc:"Ask 10 AI questions",             check:s=>s.questionsAsked>=10},
+  {id:"flash_master", icon:"⚡", title:"Flash Master",  desc:"Master 8+ flashcards",            check:s=>s.flashcardsMastered>=8},
+  {id:"quiz_5",       icon:"📝", title:"Quiz Regular",  desc:"Complete 5 quizzes",              check:s=>s.quizzesTaken>=5},
+  {id:"streak_3",     icon:"🔥", title:"On Fire",       desc:"3-day study streak",              check:s=>s.streak>=3},
+  {id:"streak_7",     icon:"🏆", title:"Week Warrior",  desc:"7-day study streak",              check:s=>s.streak>=7},
+  {id:"high_scorer",  icon:"⭐", title:"High Scorer",   desc:"80%+ average over 3 quizzes",    check:s=>s.avgScore>=80&&s.quizzesTaken>=3},
+  {id:"scholar",      icon:"🎓", title:"Scholar",       desc:"Complete 10 quizzes",             check:s=>s.quizzesTaken>=10},
+  {id:"chatterbox",   icon:"🗣️", title:"Chatterbox",   desc:"Ask 50 AI questions",             check:s=>s.questionsAsked>=50},
+];
+const achvKey = email => `learngpt:achievements:${email}`;
+function getUnlocked(email) {
+  try { return JSON.parse(localStorage.getItem(achvKey(email))||'[]'); } catch { return []; }
+}
+function checkAndUnlock(email, stats) {
+  try {
+    const unlocked = getUnlocked(email);
+    const newOnes = [];
+    ACHIEVEMENTS_DEF.forEach(a => { if (!unlocked.includes(a.id) && a.check(stats)) { unlocked.push(a.id); newOnes.push(a); } });
+    if (newOnes.length) localStorage.setItem(achvKey(email), JSON.stringify(unlocked));
+    return newOnes;
+  } catch { return []; }
+}
+
+// ═══════════════════════════════════════════════════════════════
+// 📅 ACTIVITY TRACKER (for heatmap)
+// ═══════════════════════════════════════════════════════════════
+const activityKey = email => `learngpt:activity:${email}`;
+function logActivity(email, n=1) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    const raw = localStorage.getItem(activityKey(email));
+    const data = raw ? JSON.parse(raw) : {};
+    data[today] = (data[today]||0) + n;
+    localStorage.setItem(activityKey(email), JSON.stringify(data));
+  } catch {}
+}
+function getActivity(email) {
+  try { return JSON.parse(localStorage.getItem(activityKey(email))||'{}'); } catch { return {}; }
+}
+
+// AI SUMMARY cache key
+const summaryKey = docId => `learngpt:summary:${docId}`;
+
+// ═══════════════════════════════════════════════════════════════
 // AI FUNCTION
 // ═══════════════════════════════════════════════════════════════
 async function claude(messages, system="", retries=3) {
@@ -397,6 +468,227 @@ const DonutChart = ({data, size=100}) => {
           </div>
         ))}
       </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// 🏅 ACHIEVEMENT TOAST
+// ═══════════════════════════════════════════════════════════════
+const AchievementToast = ({achievements, onDismiss}) => {
+  const [idx,setIdx] = useState(0);
+  if (!achievements?.length) return null;
+  const a = achievements[idx];
+  return (
+    <div style={{position:"fixed",bottom:90,right:24,zIndex:9999,background:"linear-gradient(135deg,#6366f1,#22d3ee)",borderRadius:16,padding:"16px 20px",minWidth:265,boxShadow:"0 20px 60px rgba(99,102,241,0.45)",animation:"fade-in 0.4s ease",color:"#fff",display:"flex",alignItems:"center",gap:12}}>
+      <div style={{fontSize:34,lineHeight:1,flexShrink:0}}>{a.icon}</div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontSize:10.5,opacity:0.85,marginBottom:3,fontWeight:700,letterSpacing:"0.07em"}}>ACHIEVEMENT UNLOCKED 🎉</div>
+        <div style={{fontSize:15,fontWeight:700,marginBottom:1}}>{a.title}</div>
+        <div style={{fontSize:12,opacity:0.85}}>{a.desc}</div>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>
+        {idx<achievements.length-1&&<button onClick={()=>setIdx(idx+1)} style={{...btn,background:"rgba(255,255,255,0.22)",color:"#fff",padding:"4px 8px",borderRadius:6,fontSize:11,fontWeight:600}}>Next</button>}
+        <button onClick={onDismiss} style={{...btn,background:"rgba(255,255,255,0.22)",color:"#fff",padding:"4px 8px",borderRadius:6,fontSize:11}}>✕ Close</button>
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// ⏱ STUDY TIMER (Pomodoro)
+// ═══════════════════════════════════════════════════════════════
+const StudyTimer = ({onStudyComplete}) => {
+  const [open,setOpen]       = useState(false);
+  const [mode,setMode]       = useState("focus");
+  const [secs,setSecs]       = useState(25*60);
+  const [running,setRunning] = useState(false);
+  const [sessions,setSessions] = useState(0);
+  const {send} = useNotif();
+  const FOCUS=25*60, BREAK=5*60;
+  const total = mode==="focus"?FOCUS:BREAK;
+  const pct   = ((total-secs)/total)*100;
+  const R=48; const C=2*Math.PI*R;
+  const dashOffset = C-(pct/100)*C;
+
+  useEffect(()=>{
+    if(!running) return;
+    const t=setInterval(()=>{
+      setSecs(s=>{
+        if(s<=1){
+          clearInterval(t); setRunning(false);
+          if(mode==="focus"){
+            setSessions(n=>n+1); onStudyComplete?.();
+            send("Focus session done! 🎯","Time for a 5-minute break.");
+            setMode("break"); setSecs(BREAK);
+          } else {
+            send("Break over! 📚","Ready for another focus session?");
+            setMode("focus"); setSecs(FOCUS);
+          }
+          return 0;
+        }
+        return s-1;
+      });
+    },1000);
+    return ()=>clearInterval(t);
+  },[running,mode]); // eslint-disable-line
+
+  const fmt = s=>`${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+  const reset=()=>{setRunning(false);setSecs(mode==="focus"?FOCUS:BREAK);};
+  const ringColor = mode==="focus"?"#6366f1":"#4ade80";
+
+  return (
+    <>
+      <button onClick={()=>setOpen(!open)} title="Study Timer" style={{...btn,position:"fixed",bottom:open?370:24,right:24,zIndex:8000,width:50,height:50,borderRadius:"50%",background:running?`linear-gradient(135deg,${ringColor},#22d3ee)`:"linear-gradient(135deg,#6366f1,#818cf8)",color:"#fff",fontSize:18,boxShadow:"0 4px 24px rgba(99,102,241,0.45)",transition:"all 0.3s",display:"flex",alignItems:"center",justifyContent:"center"}}>
+        {running?"⏸":"⏱"}
+      </button>
+      {open&&(
+        <div style={{position:"fixed",bottom:86,right:24,zIndex:8000,background:"var(--bg2)",border:"1px solid var(--border2)",borderRadius:20,padding:22,width:220,boxShadow:"0 20px 60px rgba(0,0,0,0.35)",animation:"fade-in 0.2s ease"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <span style={{fontSize:13,fontWeight:700,color:"var(--text)"}}>Pomodoro Timer</span>
+            <div style={{display:"flex",gap:5}}>
+              {[["focus","🎯"],["break","☕"]].map(([m,em])=>(
+                <button key={m} onClick={()=>{setMode(m);setRunning(false);setSecs(m==="focus"?FOCUS:BREAK);}}
+                  style={{...btn,padding:"3px 8px",borderRadius:6,fontSize:10.5,fontWeight:600,background:mode===m?"#6366f133":"transparent",border:`1px solid ${mode===m?"#6366f166":"var(--border)"}`,color:mode===m?"#818cf8":"var(--text3)"}}>
+                  {em} {m}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{display:"flex",justifyContent:"center",margin:"8px 0 14px"}}>
+            <svg width={120} height={120} viewBox="0 0 120 120">
+              <circle cx={60} cy={60} r={R} fill="none" stroke="var(--border)" strokeWidth={8}/>
+              <circle cx={60} cy={60} r={R} fill="none" stroke={ringColor} strokeWidth={8}
+                strokeDasharray={C} strokeDashoffset={dashOffset}
+                strokeLinecap="round" transform="rotate(-90 60 60)"
+                style={{transition:"stroke-dashoffset 1s linear"}}/>
+              <text x={60} y={55} textAnchor="middle" fill="var(--text)" fontSize="20" fontWeight="700" fontFamily="JetBrains Mono,monospace">{fmt(secs)}</text>
+              <text x={60} y={72} textAnchor="middle" fill="var(--text3)" fontSize="9" fontWeight="600">{mode.toUpperCase()}</text>
+            </svg>
+          </div>
+          <div style={{display:"flex",gap:7,justifyContent:"center",marginBottom:10}}>
+            <button onClick={()=>setRunning(!running)} style={{...btn,background:`linear-gradient(135deg,${ringColor},#22d3ee)`,color:"#fff",padding:"8px 20px",borderRadius:10,fontSize:13,fontWeight:600}}>{running?"Pause":"Start"}</button>
+            <button onClick={reset} style={{...btn,...glass(9),padding:"8px 11px",fontSize:13,color:"var(--text3)"}}>↺</button>
+          </div>
+          <div style={{textAlign:"center",fontSize:11.5,color:"var(--text3)"}}>🎯 {sessions} session{sessions!==1?"s":""} done today</div>
+        </div>
+      )}
+    </>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// 📅 STUDY HEATMAP
+// ═══════════════════════════════════════════════════════════════
+const StudyHeatmap = ({email}) => {
+  const activity = getActivity(email);
+  const today = new Date(); today.setHours(0,0,0,0);
+  const todayStr = today.toISOString().split('T')[0];
+  const start = new Date(today); start.setDate(start.getDate()-14*7-start.getDay());
+  const weeks = Array.from({length:15},(_,w)=>Array.from({length:7},(_,d)=>{
+    const date=new Date(start); date.setDate(start.getDate()+w*7+d);
+    const key=date.toISOString().split('T')[0];
+    return {key,count:activity[key]||0,future:date>today,isToday:key===todayStr,month:date.getMonth()};
+  }));
+  const totalActions = Object.values(activity).reduce((s,v)=>s+v,0);
+  const activeDays = Object.keys(activity).filter(k=>activity[k]>0).length;
+  const getCol=(c,future)=>future?"transparent":c===0?"var(--surface2)":c<=2?"#6366f140":c<=5?"#6366f188":"#6366f1";
+  const DAYS=["S","M","T","W","T","F","S"];
+  return (
+    <div style={{...glass(),padding:20}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <h3 style={{fontWeight:600,fontSize:15,color:"var(--text)"}}>Study Activity</h3>
+        <div style={{display:"flex",gap:12,fontSize:12,color:"var(--text3)"}}>
+          <span>📅 {activeDays} days active</span>
+          <span>⚡ {totalActions} total actions</span>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:3,overflowX:"auto",paddingBottom:4}}>
+        <div style={{display:"flex",flexDirection:"column",gap:2.5,marginRight:4,paddingTop:0}}>
+          {DAYS.map((d,i)=>(<div key={i} style={{height:11,fontSize:9,color:"var(--text3)",lineHeight:"11px",textAlign:"right",minWidth:8}}>{i%2===0?d:""}</div>))}
+        </div>
+        {weeks.map((week,wi)=>(
+          <div key={wi} style={{display:"flex",flexDirection:"column",gap:2.5}}>
+            {week.map((day,di)=>(
+              <div key={di} title={`${day.key}: ${day.count} action${day.count!==1?"s":""}`}
+                style={{width:11,height:11,borderRadius:2,background:getCol(day.count,day.future),border:day.isToday?"1.5px solid #6366f1":"none",flexShrink:0,cursor:"default"}}/>
+            ))}
+          </div>
+        ))}
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:4,marginTop:10,justifyContent:"flex-end"}}>
+        <span style={{fontSize:10,color:"var(--text3)"}}>Less</span>
+        {[0,2,4,7].map(v=>(<div key={v} style={{width:10,height:10,borderRadius:2,background:getCol(v,false)}}/>))}
+        <span style={{fontSize:10,color:"var(--text3)"}}>More</span>
+      </div>
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// 🧠 WEAK TOPICS ANALYZER
+// ═══════════════════════════════════════════════════════════════
+const WeakTopicsBox = ({questions, answers, doc}) => {
+  const [topics,setTopics] = useState(null);
+  const [loading,setLoading] = useState(false);
+  const wrongQs = questions.filter((q,i)=>answers[i]!==q.ans);
+  const analyze = async () => {
+    if(!wrongQs.length) return;
+    setLoading(true);
+    if(!rlCanCall()){setLoading(false);return;}
+    const wrongText=wrongQs.map(q=>`Q: ${q.q}\nCorrect: ${q.opts[q.ans]}\nStudent chose: ${q.opts[answers[questions.indexOf(q)]]||"nothing"}`).join('\n\n');
+    const res=await claude([{role:"user",content:`Based on wrong quiz answers for "${doc}", identify 2-3 specific topics to review. Return ONLY JSON:\n[{"topic":"name","tip":"one study tip"}]\n\nWrong answers:\n${wrongText}`}],"Return ONLY valid JSON array, no markdown.");
+    try{const clean=res.replace(/```json|```/g,'').trim();setTopics(JSON.parse(clean));}catch{setTopics([]);}
+    setLoading(false);
+  };
+  if(!wrongQs.length) return <div style={{marginTop:10,padding:"9px 12px",background:"#4ade8011",border:"1px solid #4ade8033",borderRadius:8,fontSize:13,color:"#4ade80",display:"flex",alignItems:"center",gap:7}}><span>🎉</span> No weak areas — excellent work!</div>;
+  return (
+    <div style={{marginTop:12}}>
+      {!topics&&!loading&&(<button onClick={analyze} style={{...btn,width:"100%",background:"#6366f118",border:"1px solid #6366f133",color:"#818cf8",padding:"9px",borderRadius:9,fontSize:13,fontWeight:500,display:"flex",alignItems:"center",justifyContent:"center",gap:6}}><Ic name="brain" size={13} color="#818cf8"/>Analyze My Weak Topics</button>)}
+      {loading&&<div style={{display:"flex",alignItems:"center",gap:8,padding:"10px 12px",fontSize:13,color:"var(--text3)"}}><Spinner size={13}/>Analyzing your answers…</div>}
+      {topics&&topics.length>0&&(
+        <div style={{background:"#fb923c0d",border:"1px solid #fb923c33",borderRadius:9,padding:14}}>
+          <div style={{fontSize:13,fontWeight:600,color:"#fb923c",marginBottom:10,display:"flex",alignItems:"center",gap:6}}><span>📚</span> Topics to Review</div>
+          {topics.map((t,i)=>(
+            <div key={i} style={{marginBottom:8,paddingBottom:8,borderBottom:i<topics.length-1?"1px solid #fb923c22":"none"}}>
+              <div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{t.topic}</div>
+              <div style={{fontSize:12,color:"var(--text2)",marginTop:2}}>💡 {t.tip}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      {topics&&topics.length===0&&<div style={{fontSize:13,color:"var(--text3)",padding:"8px 0"}}>Could not analyze — try again later.</div>}
+    </div>
+  );
+};
+
+// ═══════════════════════════════════════════════════════════════
+// 📄 AI DOCUMENT SUMMARY
+// ═══════════════════════════════════════════════════════════════
+const DocSummary = ({doc}) => {
+  const [summary,setSummary] = useState(()=>{try{const s=localStorage.getItem(summaryKey(doc.id));return s?JSON.parse(s):null;}catch{return null;}});
+  const [loading,setLoading] = useState(false);
+  const [expanded,setExpanded] = useState(false);
+  const generate = async () => {
+    setLoading(true);
+    if(!rlCanCall()){setLoading(false);alert("Rate limit reached. Please wait.");return;}
+    const res=await claude([{role:"user",content:`Create a structured educational summary of this document:\n1) **Overview** (2-3 sentences)\n2) **Key Topics** (5-6 bullet points)\n3) **Important Terms** (3-4 definitions)\n\nDocument: "${doc.name}"\nContent:\n${doc.text.slice(0,10000)}`}],"You are an educational summarizer. Use markdown formatting: ## headings, **bold**, - bullets.");
+    setSummary(res);
+    try{localStorage.setItem(summaryKey(doc.id),JSON.stringify(res));}catch{}
+    setLoading(false); setExpanded(true);
+  };
+  return (
+    <div style={{marginTop:10}}>
+      {!summary&&!loading&&(<button onClick={generate} style={{...btn,...glass(8),padding:"6px 13px",fontSize:12,color:"#22d3ee",display:"flex",alignItems:"center",gap:5}}><Ic name="sparkle" size={12} color="#22d3ee"/>AI Summary</button>)}
+      {loading&&<div style={{display:"flex",alignItems:"center",gap:6,fontSize:12,color:"var(--text3)",padding:"6px 0"}}><Spinner size={12}/>Generating summary…</div>}
+      {summary&&(
+        <div>
+          <button onClick={()=>setExpanded(!expanded)} style={{...btn,...glass(8),padding:"5px 11px",fontSize:12,color:"#22d3ee",display:"flex",alignItems:"center",gap:5}}>
+            <Ic name={expanded?"x":"eye"} size={11} color="#22d3ee"/>{expanded?"Hide":"Show"} AI Summary
+          </button>
+          {expanded&&(<div style={{...glass(10),padding:14,marginTop:8,fontSize:13,color:"var(--text2)",lineHeight:1.75}}>{renderMarkdown(summary)}</div>)}
+        </div>
+      )}
     </div>
   );
 };
@@ -711,10 +1003,12 @@ const Layout = ({user,page,setPage,onLogout,children,onStartTour}) => {
 // ═══════════════════════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════════════════════
-const Dashboard = ({user,docs,chatHistory,quizResults,flashcardStats,setPage}) => {
+const Dashboard = ({user,docs,chatHistory,quizResults,flashcardStats,setPage,streak}) => {
   const isAdmin = user.role==="admin";
   const totalChunks = docs.reduce((s,d)=>s+(d.chunks||0),0);
   const avgQuiz = quizResults.length ? Math.round(quizResults.reduce((s,r)=>s+r.pct,0)/quizResults.length) : null;
+  const unlocked = user.role==="student" ? getUnlocked(user.email) : [];
+  const unlockedDefs = ACHIEVEMENTS_DEF.filter(a=>unlocked.includes(a.id));
   const stats = isAdmin
     ? [{icon:"book",label:"Documents",value:docs.length,sub:totalChunks?`${totalChunks.toLocaleString()} chunks`:"-",color:"#6366f1"},{icon:"chat",label:"Questions Asked",value:chatHistory.length,sub:"This session",color:"#22d3ee"},{icon:"quiz",label:"Quizzes Taken",value:quizResults.length,sub:avgQuiz!==null?`Avg ${avgQuiz}%`:"None yet",color:"#4ade80"},{icon:"flash",label:"Flashcard Sets",value:docs.filter(d=>d.flashcards?.length>0).length,sub:"Generated",color:"#fb923c"}]
     : [{icon:"book",label:"Docs Available",value:docs.length,sub:totalChunks?`${totalChunks.toLocaleString()} chunks`:"-",color:"#6366f1"},{icon:"chat",label:"Questions Asked",value:chatHistory.length,sub:chatHistory.length?"This session":"Ask the AI tutor!",color:"#22d3ee"},{icon:"quiz",label:"Quizzes Taken",value:quizResults.length,sub:avgQuiz!==null?`Avg ${avgQuiz}%`:"None yet",color:"#4ade80"},{icon:"flash",label:"Cards Mastered",value:`${flashcardStats.known}/${flashcardStats.total}`,sub:flashcardStats.total?"Keep going!":"Generate flashcards first",color:"#fb923c"}];
@@ -738,8 +1032,35 @@ const Dashboard = ({user,docs,chatHistory,quizResults,flashcardStats,setPage}) =
           </div>
         ))}
       </div>
-      <div style={{...glass(),overflow:"hidden"}}>
-        {docs.length===0
+      {/* Streak + Achievements row (students only) */}
+      {!isAdmin&&(
+        <div style={{display:"grid",gridTemplateColumns:"auto 1fr",gap:13,marginBottom:14}}>
+          {/* Streak card */}
+          <div style={{...glass(),padding:"14px 20px",display:"flex",alignItems:"center",gap:14,minWidth:180}}>
+            <div style={{fontSize:36,lineHeight:1}}>{streak>=7?"🏆":streak>=3?"🔥":"⚡"}</div>
+            <div>
+              <div style={{fontSize:26,fontWeight:800,color:"var(--text)",lineHeight:1}}>{streak}<span style={{fontSize:14,fontWeight:500,color:"var(--text3)",marginLeft:3}}>day{streak!==1?"s":""}</span></div>
+              <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{streak===0?"Start your streak today!":streak>=7?"You're unstoppable! 🎯":"Keep it going!"}</div>
+            </div>
+          </div>
+          {/* Achievements preview */}
+          <div style={{...glass(),padding:"14px 16px",overflow:"hidden"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <span style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>Achievements</span>
+              <span style={{fontSize:12,color:"var(--text3)"}}>{unlocked.length}/{ACHIEVEMENTS_DEF.length}</span>
+            </div>
+            <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+              {ACHIEVEMENTS_DEF.map(a=>(
+                <div key={a.id} title={`${a.title}: ${a.desc}`}
+                  style={{width:34,height:34,borderRadius:8,background:unlocked.includes(a.id)?"#6366f122":"var(--surface2)",border:`1px solid ${unlocked.includes(a.id)?"#6366f144":"var(--border)"}`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,filter:unlocked.includes(a.id)?"none":"grayscale(1) opacity(0.3)",transition:"all 0.2s"}}>
+                  {a.icon}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
           ?<EmptyState icon={isAdmin?"upload":"book"} title={isAdmin?"No documents yet":"Library is empty"}
               sub={isAdmin?"Upload your first document. Students can then chat with it, take quizzes, and create flashcards.":"The admin hasn't uploaded any documents yet."}
               action={isAdmin?"Upload First Document":null} onAction={()=>setPage("upload")}/>
@@ -778,6 +1099,7 @@ const Dashboard = ({user,docs,chatHistory,quizResults,flashcardStats,setPage}) =
           <LineChart data={quizResults.map(r=>r.pct)} color="#6366f1" height={80}/>
         </div>
       )}
+      {!isAdmin&&<div style={{marginTop:14}}><StudyHeatmap email={user.email}/></div>}
     </div>
   );
 };
@@ -892,6 +1214,7 @@ const Documents = ({user,docs,onDelete,setPage,setChatDoc}) => {
                     {user.role==="admin"&&<button onClick={()=>setConfirm(doc)} style={{...btn,background:"#f8717118",border:"1px solid #f8717133",padding:"6px 9px",borderRadius:8}}><Ic name="trash" size={13} color="#f87171"/></button>}
                   </div>
                 </div>
+                {user.role==="student"&&<DocSummary doc={doc}/>}
               ))}
             </div>}
         </>}
@@ -1289,6 +1612,7 @@ const Quiz = ({docs,onResult}) => {
               <div style={{fontSize:12,color:"var(--text3)",marginTop:3}}>💡 {q.exp}</div>
             </div>
           ))}
+          <WeakTopicsBox questions={questions} answers={answers} doc={selDoc?.name||""}/>
         </div>
         <button onClick={()=>{setPhase("setup");setResultSaved(false);}} style={{...btn,...glass(9),padding:"9px 22px",fontSize:13.5,color:"var(--text)"}}>Take Another Quiz</button>
       </div>
@@ -1525,9 +1849,12 @@ const Leaderboard = ({user}) => {
 // ═══════════════════════════════════════════════════════════════
 // PROGRESS
 // ═══════════════════════════════════════════════════════════════
-const Progress = ({docs,chatHistory,quizResults,flashcardStats}) => {
+const Progress = ({user,docs,chatHistory,quizResults,flashcardStats,streak}) => {
   const avg=quizResults.length?Math.round(quizResults.reduce((s,r)=>s+r.pct,0)/quizResults.length):null;
   const best=quizResults.length?Math.max(...quizResults.map(r=>r.pct)):null;
+  const unlocked=getUnlocked(user.email);
+  const unlockedDefs=ACHIEVEMENTS_DEF.filter(a=>unlocked.includes(a.id));
+  const locked=ACHIEVEMENTS_DEF.filter(a=>!unlocked.includes(a.id));
   return (
     <div className="page-padding" style={{padding:"32px 36px",maxWidth:820,margin:"0 auto"}}>
       <h1 style={{fontSize:25,fontWeight:700,marginBottom:5,color:"var(--text)"}}>Progress</h1>
@@ -1564,10 +1891,54 @@ const Progress = ({docs,chatHistory,quizResults,flashcardStats}) => {
           </>
         )}
       </div>
-      <div style={{...glass(),padding:20}}>
+      <div style={{...glass(),padding:20,marginBottom:14}}>
         <h3 style={{fontWeight:600,marginBottom:13,color:"var(--text)"}}>Available Documents</h3>
         {docs.length===0?<div style={{textAlign:"center",padding:"18px 0",color:"var(--text3)",fontSize:13.5}}>No documents uploaded yet.</div>
           :docs.map(d=>(<div key={d.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:"1px solid var(--border)"}}><Ic name="file" size={13} color={fileClr(d.filename)}/><span style={{flex:1,fontSize:13.5,color:"var(--text)"}}>{d.name}</span><span style={{fontSize:12,color:"var(--text3)"}}>{d.chunks} chunks</span><Badge color={fileClr(d.filename)}>{d.type.toUpperCase()}</Badge></div>))}
+      </div>
+
+      {/* Streak + Heatmap */}
+      <div style={{display:"grid",gridTemplateColumns:"160px 1fr",gap:14,marginBottom:14}}>
+        <div style={{...glass(),padding:18,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",textAlign:"center"}}>
+          <div style={{fontSize:42,marginBottom:6}}>{streak>=7?"🏆":streak>=3?"🔥":"⚡"}</div>
+          <div style={{fontSize:30,fontWeight:800,color:"var(--text)",lineHeight:1}}>{streak}</div>
+          <div style={{fontSize:12,color:"var(--text3)",marginTop:4}}>day streak</div>
+        </div>
+        <StudyHeatmap email={user.email}/>
+      </div>
+
+      {/* Achievements */}
+      <div style={{...glass(),padding:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <h3 style={{fontWeight:600,color:"var(--text)"}}>Achievements</h3>
+          <Badge color="#f59e0b">{unlocked.length}/{ACHIEVEMENTS_DEF.length} unlocked</Badge>
+        </div>
+        {unlockedDefs.length>0&&(
+          <>
+            <div style={{fontSize:12,color:"var(--text3)",marginBottom:8,fontWeight:600,letterSpacing:"0.05em"}}>UNLOCKED</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(175px,1fr))",gap:9,marginBottom:16}}>
+              {unlockedDefs.map(a=>(
+                <div key={a.id} style={{...glass(10),padding:"11px 13px",display:"flex",alignItems:"center",gap:10,border:"1px solid #6366f133",background:"#6366f108"}}>
+                  <span style={{fontSize:22}}>{a.icon}</span>
+                  <div><div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{a.title}</div><div style={{fontSize:11.5,color:"var(--text3)"}}>{a.desc}</div></div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+        {locked.length>0&&(
+          <>
+            <div style={{fontSize:12,color:"var(--text3)",marginBottom:8,fontWeight:600,letterSpacing:"0.05em"}}>LOCKED</div>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(175px,1fr))",gap:9}}>
+              {locked.map(a=>(
+                <div key={a.id} style={{...glass(10),padding:"11px 13px",display:"flex",alignItems:"center",gap:10,opacity:0.45}}>
+                  <span style={{fontSize:22,filter:"grayscale(1)"}}>{a.icon}</span>
+                  <div><div style={{fontSize:13,fontWeight:600,color:"var(--text)"}}>{a.title}</div><div style={{fontSize:11.5,color:"var(--text3)"}}>{a.desc}</div></div>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -1766,6 +2137,8 @@ export default function App() {
   const [flashcardStats,setFlashcardStats] = useState({known:0,total:0});
   const [chatDoc,setChatDoc]           = useState(null);
   const [showTour,setShowTour]         = useState(false);
+  const [streak,setStreak]             = useState(0);
+  const [newAchievements,setNewAchievements] = useState([]);
   const firstRender = useRef(true);
 
   useEffect(()=>{
@@ -1782,6 +2155,19 @@ export default function App() {
 
   const handleLogin = u => {
     setUser(u); setPage("dashboard"); setRoute("app");
+    if (u.role==="student") {
+      const s = getOrUpdateStreak(u.email);
+      setStreak(s.streak);
+      logActivity(u.email, 1);
+      // check achievements on login
+      const stats = {
+        streak: s.streak,
+        quizzesTaken: 0, bestScore: 0, avgScore: 0,
+        questionsAsked: 0, flashcardsMastered: 0,
+      };
+      const newOnes = checkAndUnlock(u.email, stats);
+      if (newOnes.length) setNewAchievements(newOnes);
+    }
     const tourKey=`learngpt:tour:${u.email}`;
     try{ if(!localStorage.getItem(tourKey)) setShowTour(true); }catch{}
   };
@@ -1812,16 +2198,17 @@ export default function App() {
   const renderPage = () => {
     if(page==="upload"&&user?.role!=="admin"){setPage("dashboard");return null;}
     switch(page){
-      case "dashboard":  return <Dashboard user={user} docs={docs} chatHistory={chatHistory} quizResults={quizResults} flashcardStats={flashcardStats} setPage={setPage}/>;
+      case "dashboard":  return <Dashboard user={user} docs={docs} chatHistory={chatHistory} quizResults={quizResults} flashcardStats={flashcardStats} setPage={setPage} streak={streak}/>;
       case "upload":     return <Upload onUpload={doc=>setDocs(p=>[...p,doc])}/>;
       case "documents":  return <Documents user={user} docs={docs} onDelete={id=>setDocs(p=>p.filter(d=>d.id!==id))} setPage={setPage} setChatDoc={setChatDoc}/>;
-      case "chat":       return <Chat user={user} docs={docs} chatDoc={chatDoc} onMessage={q=>setChatHistory(p=>[...p,{q,ts:Date.now()}])}/>;
+      case "chat":       return <Chat user={user} docs={docs} chatDoc={chatDoc} onMessage={q=>{setChatHistory(p=>[...p,{q,ts:Date.now()}]);if(user.role==="student")logActivity(user.email,1);}}/>;
       case "notes":      return <Notes user={user} docs={docs}/>;
-      case "flashcards": return <Flashcards docs={docs} onUpdateDoc={(id,u)=>setDocs(p=>p.map(d=>d.id===id?{...d,...u}:d))} onFlashcardStats={setFlashcardStats}/>;
+      case "flashcards": return <Flashcards docs={docs} onUpdateDoc={(id,u)=>setDocs(p=>p.map(d=>d.id===id?{...d,...u}:d))} onFlashcardStats={stats=>{setFlashcardStats(stats);if(user.role==="student"){logActivity(user.email,1);const newOnes=checkAndUnlock(user.email,{streak,...stats,quizzesTaken:quizResults.length,bestScore:quizResults.length?Math.max(...quizResults.map(r=>r.pct)):0,avgScore:quizResults.length?Math.round(quizResults.reduce((s,r)=>s+r.pct,0)/quizResults.length):0,questionsAsked:chatHistory.length});if(newOnes.length)setNewAchievements(newOnes);}}}/>;
       case "quiz":       return <Quiz docs={docs} onResult={async r=>{
         const updated=[...quizResults,r]; setQuizResults(updated);
         if(user.role==="student"){
-          await saveProgress(user.email,{
+          logActivity(user.email, 3);
+          const progressData = {
             name:user.name,
             questionsAsked:chatHistory.length,
             quizzesTaken:updated.length,
@@ -1831,10 +2218,13 @@ export default function App() {
             totalFlashcards:flashcardStats.total,
             quizHistory:updated.slice(-5),
             lastActive:Date.now(),
-          });
+          };
+          await saveProgress(user.email, progressData);
+          const newOnes = checkAndUnlock(user.email, {...progressData, streak});
+          if (newOnes.length) setNewAchievements(newOnes);
         }
       }}/>;
-      case "progress":    return <Progress docs={docs} chatHistory={chatHistory} quizResults={quizResults} flashcardStats={flashcardStats}/>;
+      case "progress":    return <Progress user={user} docs={docs} chatHistory={chatHistory} quizResults={quizResults} flashcardStats={flashcardStats} streak={streak}/>;
       case "analytics":   return <Analytics docs={docs} chatHistory={chatHistory} quizResults={quizResults}/>;
       case "quiz-mgmt":   return <QuizManagement docs={docs}/>;
       case "leaderboard": return <Leaderboard user={user}/>;
@@ -1865,6 +2255,8 @@ export default function App() {
             </Layout>
           )}
           {showTour && user && <OnboardingTour onComplete={handleTourComplete} isAdmin={user.role==="admin"}/>}
+          {newAchievements.length>0 && <AchievementToast achievements={newAchievements} onDismiss={()=>setNewAchievements([])}/>}
+          {user?.role==="student" && route==="app" && <StudyTimer onStudyComplete={()=>logActivity(user.email,2)}/>}
         </div>
       </NotifCtx.Provider>
     </ThemeCtx.Provider>
